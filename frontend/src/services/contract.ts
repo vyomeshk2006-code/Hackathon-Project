@@ -1,7 +1,7 @@
 import type {
   DirectoryPlayer, GameDetails, GameInput, GameSummary, InboxItem, PlayerDetails, PlayerFilters,
-  Profile, ProfileInput, Response, ResultInput, ReviewInput, Session, Team, TeamAssignment,
-  BrowseFilters, BrowseGame, BulkInviteResult, ChatMessage, ChatStatus, JoinDecision, Notification,
+  Profile, AccountProfileInput, AccountDetails, GameContact, GameEdit, Response, ResultInput, ReviewInput, Session, Team, TeamAssignment,
+  BrowseFilters, BrowseGame, BulkInviteResult, JoinDecision, Notification,
   NotificationPreferences, Sport, SportDefinition, Squad,
 } from '../types/domain'
 
@@ -12,9 +12,13 @@ export interface PickupService {
   signOut(): Promise<void>
   getProfile(id: string): Promise<Profile | null>
   getPlayerDetails(id: string): Promise<PlayerDetails | null>
-  saveProfile(input: ProfileInput): Promise<Profile>
+  saveProfile(input: AccountProfileInput): Promise<Profile>
+  getAccountDetails(): Promise<AccountDetails>
+  usernameAvailable(username: string): Promise<boolean>
+  getGameContacts(gameId: string): Promise<GameContact[]>
   findPlayers(filters: PlayerFilters): Promise<DirectoryPlayer[]>
   createGame(input: GameInput): Promise<string>
+  editGame(gameId: string, input: GameEdit): Promise<void>
   myGames(): Promise<GameSummary[]>
   getGame(id: string): Promise<GameDetails | null>
   invite(gameId: string, recipientId: string, team?: Team | null): Promise<string>
@@ -42,11 +46,6 @@ export interface PickupService {
   markNotificationsRead(ids?: string[]): Promise<number>
   getNotificationPreferences(): Promise<NotificationPreferences>
   setNotificationPreferences(preferences: NotificationPreferences): Promise<void>
-  getChat(gameId: string): Promise<ChatMessage[]>
-  getChatStatus(gameId: string): Promise<ChatStatus>
-  markChatRead(gameId: string): Promise<string>
-  sendMessage(gameId: string, body: string): Promise<string>
-  subscribeToChat(gameId: string, listener: () => void): () => void
   subscribeToNotifications(listener: () => void): () => void
   mySquads(): Promise<Squad[]>
   createSquad(name: string, sport: Sport): Promise<string>

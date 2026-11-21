@@ -3,16 +3,17 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { GameAdministration, TeamRoster, WithdrawGame } from '../components/GameManagement'
-import { GameChat } from '../components/GameChat'
+import { GameContacts } from '../components/GameContacts'
 import { SportPicker } from '../components/SportPicker'
 import { ParticipationActions } from './Browse'
 import { MatchResults } from '../components/MatchResults'
-import { GameCard, LoadError, Notice, PageTitle, SportBadge } from '../components/ui'
+import { GameCard, LoadError, Notice, PageTitle, SportBadge, VenueDetails } from '../components/ui'
+import { useGameClock } from '../hooks/useGameClock'
 import { errorMessage, useResource } from '../hooks/useResource'
 import { formatGameTime, tampaInput, tampaToIso } from '../lib/time'
 import { pickup } from '../services'
-import { isUpcoming, neighborhoods, skills } from '../types/domain'
-import type { GameSummary, InboxItem, Neighborhood, Profile, Response, Session, Skill, Visibility } from '../types/domain'
+import { isActiveGame, isUpcoming, skills } from '../types/domain'
+import type { Game, GameEdit, GameSummary, InboxItem, Profile, Response, Session, Skill, Visibility } from '../types/domain'
 
 function GameList({ title, games, empty }: { title: string; games: GameSummary[]; empty: string }) {
   return (
@@ -24,13 +25,16 @@ function GameList({ title, games, empty }: { title: string; games: GameSummary[]
 }
 
 function MyGameLists({ games, userId }: { games: GameSummary[]; userId: string }) {
-  const upcoming = games.filter(isUpcoming)
+  const now = useGameClock(games.flatMap(game => [game.startsAt, game.endsAt]))
+  const upcoming = games.filter(game => isUpcoming(game, now))
+  const ongoing = games.filter(game => isActiveGame(game, now) && !isUpcoming(game, now))
   const completed = games.filter(game => game.status === 'completed').reverse()
-  const inactive = games.filter(game => !isUpcoming(game) && game.status !== 'completed').reverse()
+  const inactive = games.filter(game => !isUpcoming(game, now) && !isActiveGame(game, now) && game.status !== 'completed').reverse()
   return (
     <>
       <GameList title="Upcoming · You organize" games={upcoming.filter(game => game.organizerId === userId)} empty="You haven’t organized an upcoming game." />
       <GameList title="Upcoming · You’ve joined" games={upcoming.filter(game => game.organizerId !== userId)} empty="Accepted game invitations will appear here." />
+      {!!ongoing.length && <GameList title="Ongoing games" games={ongoing} empty="" />}
       {!!completed.length && <GameList title="Completed games" games={completed} empty="" />}
       {!!inactive.length && <GameList title="Past and cancelled games" games={inactive} empty="" />}
     </>
@@ -56,7 +60,7 @@ export function Dashboard({ session, profile }: { session: Session; profile: Pro
       </div>
       {games.state.status === 'loading' && <Notice>Loading your games…</Notice>}
       {games.state.status === 'error' && <LoadError error={games.state.error} retry={games.retry} />}
-      {games.state.status === 'ready' && <GameList title="Coming up" games={games.state.data.filter(isUpcoming).slice(0, 3)} empty="Your next organized or joined game will appear here." />}
+      {games.state.status === 'ready' && <GameList title="Coming up" games={games.state.data.filter(game => isUpcoming(game)).slice(0, 3)} empty="Your next organized or joined game will appear here." />}
     </>
   )
 }
@@ -77,31 +81,56 @@ export function MyGames({ session }: { session: Session }) {
   )
 }
 
-export function CreateGame() {
+
+export function CreateGame() { return <GameForm /> }
+
+export function EditGame({ session }: { session: Session }) {
+  const { id = '' } = useParams()
+  const { state, retry } = useResource('edit:' + session.userId + ':' + id, () => pickup.getGame(id))
+  if (state.status === 'loading') return <Notice>Loading game…</Notice>
+  if (state.status === 'error') return <LoadError error={state.error} retry={retry} />
+  const game = state.data
+  if (!game || game.organizerId !== session.userId || !isUpcoming(game)) {
+    return <Notice>Game editing is available to organizers before kickoff. <Link className="text-link" to="/games">My games</Link></Notice>
+  }
+  return <GameForm key={game.id} existing={game} />
+}
+
+function GameForm({ existing }: { existing?: Game }) {
   const [sport, setSport] = useState('')
   const [teamSize, setTeamSize] = useState('5')
+  const initialStart = existing ? tampaInput(new Date(existing.startsAt)).split('T') : []
+  const initialEnd = existing?.endsAt ? tampaInput(new Date(existing.endsAt)).split('T') : []
+  const [date, setDate] = useState(initialStart[0] ?? '')
+  const [endDate, setEndDate] = useState(initialEnd[0] ?? '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     setError('')
     setBusy(true)
     try {
-      const gameId = await pickup.createGame({
-        title: String(form.get('title')),
-        sport,
-        venue: String(form.get('venue')),
-        neighborhood: String(form.get('neighborhood')) as Neighborhood,
-        startsAt: tampaToIso(String(form.get('date')) + 'T' + String(form.get('time'))),
-        maxPlayers: Number(teamSize) * 2,
-        teamSize: Number(teamSize),
-        joinMode: String(form.get('joinMode')) as Visibility,
-        skillLevel: (String(form.get('skill')) || null) as Skill | null,
+      const input: GameEdit = {
+        title: String(form.get('title')), venue: String(form.get('venue')), venueAddress: String(form.get('address')),
         description: String(form.get('description')),
-      })
-      navigate(`/games/${gameId}`, { replace: true })
+        startsAt: tampaToIso(date + 'T' + String(form.get('time'))),
+        endsAt: tampaToIso((endDate || date) + 'T' + String(form.get('endTime'))),
+      }
+      if (Date.parse(input.endsAt) <= Date.parse(input.startsAt)) throw new Error('Choose an end time after the start.')
+      if (existing) {
+        await pickup.editGame(existing.id, input)
+        navigate('/games/' + existing.id, { replace: true })
+      } else {
+        const id = await pickup.createGame({
+          ...input, sport, maxPlayers: Number(teamSize) * 2, teamSize: Number(teamSize),
+          joinMode: String(form.get('joinMode')) as Visibility,
+          skillLevel: (String(form.get('skill')) || null) as Skill | null,
+        })
+        navigate('/games/' + id, { replace: true })
+      }
     } catch (error) {
       setError(errorMessage(error))
     } finally {
@@ -109,11 +138,11 @@ export function CreateGame() {
     }
   }
 
-  return (
-    <>
-      <PageTitle title="Create a game" subtitle="Set the details, then invite players to fill the open spots." />
-      <form className="card form-stack editor" onSubmit={submit}>
-        <label>Game title<input name="title" required maxLength={80} placeholder="Saturday 5-a-side soccer" /></label>
+  return <>
+    <PageTitle title={existing ? 'Edit game' : 'Create a game'} subtitle={existing ? 'Update the schedule and venue before kickoff.' : 'Set the venue and schedule so players know where and when to meet.'} />
+    <form className="card form-stack editor" onSubmit={submit}>
+      <label>Game title<input name="title" required maxLength={80} defaultValue={existing?.title} /></label>
+      {!existing && <>
         <SportPicker value={sport} onChange={setSport} create />
         <div className="form-grid">
           <label>Game type<select name="joinMode" defaultValue="open"><option value="open">Open</option><option value="invite_only">Invite-only</option></select></label>
@@ -123,45 +152,53 @@ export function CreateGame() {
           <label>Players per team<input type="number" min="1" max="25" required value={teamSize} onChange={event => setTeamSize(event.target.value)} /></label>
           <label>Maximum players<input value={teamSize ? Number(teamSize) * 2 : ''} readOnly /><span className="field-hint">Includes the organizer.</span></label>
         </div>
-        <label>Venue<input name="venue" required maxLength={100} placeholder="Park, field, or court name" /></label>
-        <label>Game neighborhood<select name="neighborhood" required defaultValue="">
-          <option value="" disabled>Choose a Tampa area</option>
-          {Object.entries(neighborhoods).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select></label>
-        <div className="form-grid">
-          <label>Game date (Tampa time)<input name="date" type="date" required min={tampaInput(new Date()).slice(0, 10)} /></label>
-          <label>Start time (Tampa time)<input name="time" type="time" required /></label>
-        </div>
-        <label>Description (optional)<textarea rows={3} name="description" maxLength={500} /></label>
-        {!sport && <p className="muted">Select a suggested sport or choose “Use custom sport.”</p>}
-        {error && <Notice tone="error">{error}</Notice>}
-        <button className="button primary self-start" disabled={busy || !sport}>{busy ? 'Creating game…' : 'Create game'}</button>
-      </form>
-    </>
-  )
+      </>}
+      <label>Venue name<input name="venue" required maxLength={100} defaultValue={existing?.venue} /></label>
+      <label>Exact venue address<input name="address" required minLength={3} maxLength={200} defaultValue={existing?.venueAddress}
+        placeholder="Street address or unambiguous venue location" /></label>
+      <div className="form-grid">
+        <label>Game date (Tampa time)<input type="date" required min={tampaInput(new Date()).slice(0, 10)} value={date} onChange={event => setDate(event.target.value)} /></label>
+        <label>Start time (Tampa time)<input name="time" type="time" required defaultValue={initialStart[1]} /></label>
+        <label>End date (Tampa time)<input type="date" required min={date} value={endDate || date} onChange={event => setEndDate(event.target.value)} /></label>
+        <label>End time (Tampa time)<input name="endTime" type="time" required defaultValue={initialEnd[1]} /></label>
+      </div>
+      <label>Description (optional)<textarea rows={3} name="description" maxLength={500} defaultValue={existing?.description} /></label>
+      {!existing && !sport && <p className="muted">Select a suggested sport or choose “Use custom sport.”</p>}
+      {error && <Notice tone="error">{error} {error.includes('Settings') && <Link className="text-link" to="/settings">Settings</Link>}</Notice>}
+      <button className="button primary self-start" disabled={busy || (!existing && !sport)}>
+        {busy ? 'Saving…' : existing ? 'Save game changes' : 'Create game'}
+      </button>
+    </form>
+  </>
 }
 
 export function GameDetail({ session }: { session: Session }) {
   const { id = '' } = useParams()
   const [params] = useSearchParams()
   const { state, retry } = useResource(`${session.userId}:${id}`, () => pickup.getGame(id))
+  const clock = useGameClock(state.status === 'ready' && state.data ? [state.data.startsAt, state.data.endsAt] : [])
   if (state.status === 'loading') return <Notice>Loading game and roster…</Notice>
   if (state.status === 'error') return <LoadError error={state.error} retry={retry} />
   if (!state.data) return <Notice>This game is unavailable. <Link className="text-link" to="/games">My games</Link></Notice>
   const game = state.data
   const remaining = Math.max(0, game.maxPlayers - game.confirmed)
   const organizer = game.organizerId === session.userId
-  const canInvite = organizer && isUpcoming(game) && remaining > 0
-  const playerSearch = new URLSearchParams({ match: 'travel', sport: game.sport, neighborhood: game.neighborhood, game: game.id })
+  const upcoming = isUpcoming(game, clock)
+  const active = isActiveGame(game, clock)
+  const canInvite = organizer && upcoming && active && remaining > 0
+  const playerSearch = new URLSearchParams({ sport: game.sport, game: game.id })
   const replacements = new URLSearchParams(playerSearch)
   replacements.set('replacement', '1')
   if (game.skillLevel) replacements.set('skill', game.skillLevel)
-  const gameStatus = isUpcoming(game) ? 'Upcoming' : game.status === 'scheduled' ? 'Past' : game.status
+  const gameStatus = upcoming ? 'Upcoming' : active ? 'Ongoing' : game.status === 'scheduled' ? 'Past' : game.status
   return (
     <>
-      <PageTitle title={game.title} action={canInvite && <div className="flex flex-wrap gap-2">
+      <PageTitle title={game.title} action={<div className="flex flex-wrap gap-2">
+        {organizer && upcoming && <Link className="button secondary" to={'/games/' + game.id + '/edit'}>Edit game</Link>}
+        {canInvite && <>
         <Link className="button primary" to={'/players?' + playerSearch}>Find players to invite</Link>
         <Link className="button secondary" to={'/players?' + replacements}>Find replacement</Link>
+        </>}
       </div>} />
       <div className="detail-grid">
         <section className="card form-stack" aria-label="Game details">
@@ -169,20 +206,21 @@ export function GameDetail({ session }: { session: Session }) {
           <p className="muted">{game.joinMode === 'open' ? 'Open game' : 'Invite-only'} · {game.skillLevel ? skills[game.skillLevel] : 'All levels'}
             {game.teamSize && ' · ' + game.teamSize + 'v' + game.teamSize}</p>
           <p className="icon-line"><CalendarDays size={19} aria-hidden="true" />{formatGameTime(game.startsAt)}</p>
-          <p className="icon-line"><MapPin size={19} aria-hidden="true" />{game.venue} · {neighborhoods[game.neighborhood]}</p>
+          <VenueDetails venue={game.venue} address={game.venueAddress} />
+          {game.endsAt ? <p className="muted">Ends {formatGameTime(game.endsAt)}</p> : <Notice>Organizer: add an exact address and end time to list this legacy game.</Notice>}
           {game.description && <p>{game.description}</p>}
           <div className="capacity">
             <div className="flex flex-wrap justify-between gap-2"><strong>{game.confirmed} of {game.maxPlayers} confirmed</strong>
-              {isUpcoming(game) && <span>{remaining} {remaining === 1 ? 'spot' : 'spots'} open</span>}
+              {upcoming && active && <span>{remaining} {remaining === 1 ? 'spot' : 'spots'} open</span>}
             </div>
             <progress value={game.confirmed} max={game.maxPlayers} aria-label="Confirmed players" />
           </div>
-          {!organizer && <ParticipationActions game={game} access={game.participation} allowClaim />}
-          {!organizer && game.participation.isMember && isUpcoming(game) && <WithdrawGame game={game} />}
+          {!organizer && active && <ParticipationActions game={game} access={game.participation} allowClaim />}
+          {!organizer && game.participation.isMember && upcoming && <WithdrawGame game={game} />}
         </section>
         <TeamRoster key={game.id} game={game} organizer={organizer} />
       </div>
-      {game.participation.isMember && <GameChat key={game.id} game={game} userId={session.userId} />}
+      {active && (organizer || game.participation.isMember) && <GameContacts key={game.id} gameId={game.id} userId={session.userId} />}
       <MatchResults key={`result:${game.id}`} game={game} userId={session.userId} />
       {organizer && <GameAdministration key={`manage:${game.id}`} game={game} session={session} focusRequest={params.get('request')} />}
     </>
@@ -211,7 +249,7 @@ function PendingInvitation({ item, onResponse }: { item: InboxItem; onResponse: 
       <h2><Link className="card-link" to={`/games/${item.gameId}`}>{item.game.title}</Link></h2>
       <p className="muted">Invited by {item.senderName}{item.team && ' · Team ' + item.team}</p>
       <p className="icon-line"><CalendarDays size={17} aria-hidden="true" />{formatGameTime(item.game.startsAt)}</p>
-      <p className="icon-line"><MapPin size={17} aria-hidden="true" />{item.game.venue} · {neighborhoods[item.game.neighborhood]}</p>
+      <VenueDetails venue={item.game.venue} address={item.game.venueAddress} />
       {full && <Notice>This game is full.</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
       <div className="flex flex-wrap gap-2">

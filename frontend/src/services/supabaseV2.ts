@@ -4,8 +4,8 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import type { GameInput, Neighborhood, Profile, ProfileInput, Response, Session, Skill, Team } from '../types/domain'
 import { errorMessages, PickupError } from './errors'
 
-type V2ProfileInput = Omit<ProfileInput, 'notificationPreferences'>
-type V2GameInput = Omit<GameInput, 'teamSize' | 'joinMode' | 'skillLevel' | 'description'>
+type V2ProfileInput = Omit<ProfileInput, 'notificationPreferences' | 'username'> & { travelRadiusMiles: number }
+type V2GameInput = Omit<GameInput, 'teamSize' | 'joinMode' | 'skillLevel' | 'description' | 'venueAddress' | 'endsAt'> & { neighborhood: Neighborhood }
 type V2Performance = { playerId: string; goals?: number; assists?: number; points?: number }
 type V2SearchRow = {
   id: string; display_name: string; neighborhood: Neighborhood; travel_radius_miles: number; bio: string
@@ -44,7 +44,7 @@ export function supabaseV2Adapter(client: SupabaseClient) {
     check(error)
     if (!data) return null
     return { id: data.id, displayName: data.display_name, neighborhood: data.neighborhood,
-      travelRadiusMiles: data.travel_radius_miles, bio: data.bio,
+      bio: data.bio,
       sports: data.user_sports.map(row => ({ sport: row.sport_slug, skill: row.skill_level })),
     }
   }

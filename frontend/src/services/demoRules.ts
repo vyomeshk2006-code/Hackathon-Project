@@ -1,7 +1,7 @@
 
-import { defaultPreferences, isUpcoming, skills } from '../types/domain'
-import type { Game, Notification, NotificationType, Participation, Profile, Skill, Sport, Team } from '../types/domain'
-import { displayName, finalReviews, neighborhoodDistance } from './demoQueries'
+import { defaultPreferences, isActiveGame, isUpcoming, skills } from '../types/domain'
+import type { Game, Notification, NotificationType, Participation, Profile, Sport, Team } from '../types/domain'
+import { displayName } from './demoQueries'
 import type { DemoData } from './demoQueries'
 import { PickupError, requireRule } from './errors'
 
@@ -9,7 +9,10 @@ export const now = () => new Date().toISOString()
 export const rosterFor = (data: DemoData, gameId: string) => data.roster.filter(row => row.gameId === gameId)
 export const preferenceFor = (profile: Profile | undefined, sport: Sport) => profile?.sports.find(item => item.sport === sport)
 export const profileFor = (data: DemoData, id: string) => data.profiles.find(profile => profile.id === id)
-export const nearby = (profile: Profile, game: Game) => neighborhoodDistance(profile.neighborhood, game.neighborhood) <= profile.travelRadiusMiles
+export const contactFor = (data: DemoData, id: string) => data.contacts.find(row => row.playerId === id)?.phoneNumber
+export function requireContact(data: DemoData, id: string) {
+  requireRule(contactFor(data, id), 'CONTACT_REQUIRED')
+}
 
 export function selfServiceIssue(profile: Profile | undefined, game: Game) {
   const preference = preferenceFor(profile, game.sport)
@@ -24,7 +27,7 @@ export function matchesLevel(profile: Profile | undefined, game: Game) {
 }
 
 export function canSeeGame(data: DemoData, game: Game, id: string) {
-  return isUpcoming(game) || game.joinMode === 'open' || game.organizerId === id ||
+  return isActiveGame(game) || game.joinMode === 'open' || game.organizerId === id ||
     rosterFor(data, game.id).some(row => row.playerId === id) ||
     data.invitations.some(row => row.gameId === game.id && row.recipientId === id && row.status === 'pending') ||
     data.alerts.some(row => row.gameId === game.id && row.playerId === id) ||
@@ -34,8 +37,9 @@ export function canSeeGame(data: DemoData, game: Game, id: string) {
 export function participation(data: DemoData, game: Game, id: string): Participation {
   const roster = rosterFor(data, game.id)
   const isMember = roster.some(row => row.playerId === id)
-  const available = isUpcoming(game) && roster.length < game.maxPlayers && !isMember
-  const ineligibleReason = selfServiceIssue(profileFor(data, id), game)
+  const available = isActiveGame(game) && isUpcoming(game) && roster.length < game.maxPlayers && !isMember
+  const ineligibleReason = selfServiceIssue(profileFor(data, id), game) ??
+    (contactFor(data, id) ? undefined : 'Add a contact phone number in Settings before joining.')
   const eligible = available && !ineligibleReason
   const requestId = data.requests.find(row => row.gameId === game.id && row.playerId === id && row.status === 'pending')?.id
   return {
@@ -66,6 +70,7 @@ export function teamHasRoom(data: DemoData, game: Game, team: Team | null, excep
 export function addToRoster(data: DemoData, game: Game, playerId: string, team: Team | null) {
   const roster = rosterFor(data, game.id)
   if (roster.some(row => row.playerId === playerId)) return
+  requireContact(data, playerId)
   requireRule(roster.length < game.maxPlayers, 'GAME_FULL')
   requireRule(teamHasRoom(data, game, team), 'TEAM_FULL')
   const at = now()
@@ -86,7 +91,7 @@ export function addToRoster(data: DemoData, game: Game, playerId: string, team: 
 
 export function validateInvite(data: DemoData, gameId: string, caller: string, team: Team | null) {
   const game = organize(data, gameId, caller)
-  requireRule(isUpcoming(game), 'GAME_UNAVAILABLE')
+  requireRule(isUpcoming(game) && isActiveGame(game), 'GAME_UNAVAILABLE')
   requireRule(team === null || team === 'A' || team === 'B', 'VALIDATION')
   requireRule(teamHasRoom(data, game, team), 'TEAM_FULL')
   return game
@@ -122,44 +127,12 @@ export function inviteGroup(data: DemoData, game: Game, recipients: string[], te
 export function notifyNewGame(data: DemoData, game: Game) {
   for (const profile of data.profiles) {
     if (profile.id !== game.organizerId && profile.notificationPreferences?.newGameAlerts &&
-      matchesLevel(profile, game) && nearby(profile, game)) {
-      emit(data, profile.id, 'new_game_nearby', 'New game nearby', game.title, { gameId: game.id })
+      matchesLevel(profile, game)) {
+      emit(data, profile.id, 'new_game_available', 'New game available', game.title, { gameId: game.id })
     }
   }
 }
 
 export function replacementEnabled(profile: Profile) {
   return (profile.notificationPreferences ?? defaultPreferences).replacementAlerts
-}
-
-const startingScore: Record<Skill, number> = { beginner: 1.5, intermediate: 3, advanced: 4.5 }
-
-export function recalculateLevel(data: DemoData, playerId: string, sport: Sport) {
-  const record = data.skillRecords.find(row => row.playerId === playerId && row.sport === sport)
-  if (!record) return
-  const latest = new Map(finalReviews(data, playerId).filter(review => review.sport === sport && review.skillRating !== null)
-    .map(review => [review.reviewerId, review]))
-  const ranked = [...latest.values()].sort((a, b) => a.skillRating! - b.skillRating!)
-  const counted = ranked.length >= 5 ? ranked.slice(1, -1) : ranked
-  record.ratingCount = counted.length
-  if (counted.length >= 3 && new Set(counted.map(review => review.gameId)).size >= 2) {
-    record.verified = true
-    const score = (3 * startingScore[record.starting] + counted.reduce((total, review) => total + review.skillRating!, 0)) / (3 + counted.length)
-    const previous = record.level
-    if (score >= 3.92) record.level = 'advanced'
-    else if (score <= 2.08) record.level = 'beginner'
-    else if ((previous === 'beginner' && score >= 2.58) || (previous === 'advanced' && score <= 3.42)) {
-      record.level = 'intermediate'
-    }
-    if (record.level !== previous) {
-      emit(data, playerId, 'level_changed', 'Verified skill level changed',
-        (data.catalog.find(item => item.slug === sport)?.name ?? sport) + ': ' + record.level + ' · ' + counted.length + ' player ratings')
-    }
-  }
-  const preference = preferenceFor(profileFor(data, playerId), sport)
-  if (preference) {
-    preference.skill = record.level
-    preference.levelSource = record.verified ? 'verified' : 'self'
-    preference.ratingCount = record.ratingCount
-  }
 }

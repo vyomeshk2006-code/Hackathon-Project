@@ -23,11 +23,14 @@ beforeEach(() => {
 
 const sign = account => signInAsDemoAccount(account.id)
 const clock = t => t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-01-16T15:00:00Z') })
-const game = (options = {}) => service.createGame({
-  sport: 'soccer', title: 'Tampa pickup', venue: 'Demo field', neighborhood: 'downtown',
-  startsAt: new Date(Date.now() + 45 * 60_000).toISOString(),
-  maxPlayers: 2, teamSize: 1, joinMode: 'open', ...options,
-})
+const game = (options = {}) => {
+  const startsAt = options.startsAt ?? new Date(Date.now() + 45 * 60_000).toISOString()
+  return service.createGame({
+    sport: 'soccer', title: 'Tampa pickup', venue: 'Demo field', venueAddress: '100 Example Ave, Tampa, FL', startsAt,
+    endsAt: new Date(Date.parse(startsAt) + 60 * 60_000).toISOString(),
+    maxPlayers: 2, teamSize: 1, joinMode: 'open', ...options,
+  })
+}
 
 async function addSport(account, sport, skill = 'intermediate') {
   sign(account)
@@ -53,7 +56,7 @@ test('sport normalization, catalog persistence, signup onboarding, and customize
   assert.equal((await service.listSports()).filter(row => row.slug === first.slug).length, 1)
   assert.notEqual((await service.createSport('Disc-Golf')).slug, first.slug)
   await assert.rejects(service.createSport('!'), { code: 'VALIDATION' })
-  await service.saveProfile({ displayName: 'Riley', neighborhood: 'downtown', bio: '', travelRadiusMiles: 5,
+  await service.saveProfile({ displayName: 'Riley', username: 'riley', phoneNumber: '+12025550148', neighborhood: 'downtown', bio: '',
     sports: [{ sport: first.slug, skill: 'intermediate' }],
     notificationPreferences: { replacementAlerts: false, newGameAlerts: true } })
   assert.equal((await service.getNotificationPreferences()).replacementAlerts, false)
@@ -89,7 +92,7 @@ test('future games are discoverable regardless of skill or membership and action
   await assert.rejects(service.requestToJoin(restricted), { code: 'NOT_ELIGIBLE' })
   await assert.rejects(service.requestToJoin(otherSport), { code: 'NOT_ELIGIBLE' })
   await assert.rejects(service.requestToJoin(cancelled), { code: 'GAME_UNAVAILABLE' })
-  await assert.rejects(service.getChat(restricted), { code: 'FORBIDDEN' })
+  await assert.rejects(service.getGameContacts(restricted), { code: 'FORBIDDEN' })
 
   const profileless = await service.signUp('viewer@example.test', 'demo-password')
   assert.equal(await service.getProfile(profileless.userId), null)
@@ -98,7 +101,7 @@ test('future games are discoverable regardless of skill or membership and action
   await assert.rejects(service.requestToJoin(allLevels), { code: 'NOT_ELIGIBLE' })
 
   sign(maya)
-  assert.equal((await service.browseGames({ sport: 'soccer', from: '2027-01-16', to: '2027-01-16' })).length, 3)
+  assert.equal((await service.browseGames({ sportName: 'Soccer', from: '2027-01-16', to: '2027-01-16' })).length, 3)
   assert.equal((await service.browseGames({ from: '2027-01-17' })).length, 0)
   assert.equal((await service.getGame(open)).participation.canJoin, true)
   await service.joinGame(open)
@@ -158,6 +161,9 @@ test('join approvals check team and game capacity and declines notify only the r
   assert.equal((await service.getGame(id)).participation.requestId, andreRequest)
   assert.equal(await service.cancelJoinRequest(andreRequest), 'cancelled')
   t.mock.timers.setTime(new Date('2027-01-16T16:30:00Z').getTime())
+  assert.equal((await service.browseGames()).length, 1)
+  await assert.rejects(service.requestToJoin(id), { code: 'GAME_UNAVAILABLE' })
+  t.mock.timers.setTime(new Date('2027-01-16T16:45:00Z').getTime())
   assert.equal((await service.browseGames()).length, 0)
   assert.equal(await service.getGame(id), null)
   await assert.rejects(service.requestToJoin(id), { code: 'GAME_UNAVAILABLE' })
@@ -218,33 +224,27 @@ test('team caps, individual and bulk invitations, squad consent and squad invita
   assert.ok(roster.filter(row => row.team === 'B').length <= 2)
 })
 
-test('chat privacy, notification preferences, withdrawals and serialized replacement claims', async t => {
+test('contact privacy, notification preferences, withdrawals and serialized replacement claims', async t => {
   clock(t)
   sign(sofia)
   await service.setNotificationPreferences({ replacementAlerts: false, newGameAlerts: true })
   sign(jordan)
   const id = await game()
   await service.setTeam(id, jordan.id, 'A')
-  await assert.rejects(service.sendMessage(id, '   '), { code: 'VALIDATION' })
-  await service.sendMessage(id, 'Bring water.')
   sign(maya)
-  await assert.rejects(service.getChat(id), { code: 'FORBIDDEN' })
+  await assert.rejects(service.getGameContacts(id), { code: 'FORBIDDEN' })
   await service.joinGame(id)
-  assert.equal((await service.getChatStatus(id)).hasNew, true)
-  await service.markChatRead(id)
-  assert.equal((await service.getChatStatus(id)).hasNew, false)
-  assert.equal((await service.getChat(id))[0].body, 'Bring water.')
+  assert.equal((await service.getGameContacts(id))[0].name, 'Jordan Rivera')
   sign(jordan)
   await service.setTeam(id, maya.id, 'B')
   sign(maya)
   await service.withdraw(id)
   await service.withdraw(id)
   assert.equal((await service.myGames()).length, 0)
-  await assert.rejects(service.getChat(id), { code: 'FORBIDDEN' })
-  await assert.rejects(service.sendMessage(id, 'Still here'), { code: 'FORBIDDEN' })
+  await assert.rejects(service.getGameContacts(id), { code: 'FORBIDDEN' })
   assert.equal((await service.notifications()).some(row => row.type === 'replacement_needed'), false)
   sign(sofia)
-  assert.deepEqual((await service.notifications()).map(row => row.type), ['new_game_nearby'])
+  assert.deepEqual((await service.notifications()).map(row => row.type), ['new_game_available'])
   await assert.rejects(service.claimReplacement(id), { code: 'NOT_ELIGIBLE' })
   sign(andre)
   assert.equal((await service.notifications()).filter(row => row.type === 'replacement_needed').length, 1)
@@ -325,7 +325,7 @@ test('universal stats work for custom sports, and configured stats only count th
   assert.equal((await service.getPlayerDetails(jordan.id)).sportStats.find(row => row.sport === 'basketball').metrics.rebounds, 3)
 })
 
-test('private skill evidence verifies only after enough distinct raters and locks level edits', async t => {
+test('anonymous peer skill evidence stays separate from self-declared skill and defers unapproved normalization', async t => {
   clock(t)
   async function played(roster) {
     sign(jordan)
@@ -345,56 +345,21 @@ test('private skill evidence verifies only after enough distinct raters and lock
   sign(andre)
   await service.submitReview(first, review)
   assert.equal((await service.getProfile(jordan.id)).sports[0].skill, 'intermediate')
-  assert.equal((await service.getProfile(jordan.id)).sports[0].levelSource, 'self')
+  assert.equal((await service.getPlayerDetails(jordan.id)).skillRatings.find(row => row.sport === 'soccer').provisional, true)
   sign(cam)
   await service.submitReview(second, review)
   const player = await service.getPlayerDetails(jordan.id)
-  const soccer = player.sports.find(item => item.sport === 'soccer')
-  assert.equal(soccer.skill, 'advanced')
-  assert.equal(soccer.levelSource, 'verified')
-  assert.equal(soccer.ratingCount, 3)
+  const soccer = player.skillRatings.find(item => item.sport === 'soccer')
+  assert.equal(soccer.peers, 3)
+  assert.equal(soccer.peerScore, 100)
+  assert.equal(soccer.requiresStatNormalization, true)
+  assert.equal(soccer.score, null)
+  assert.equal(soccer.provisional, true)
   assert.equal(player.avgRating, 1)
   assert.ok(player.reviews.every(item => !('reviewerId' in item) && !('reviewerName' in item) && !('gameId' in item) && !('createdAt' in item)))
   sign(jordan)
-  assert.equal((await service.notifications()).filter(row => row.type === 'level_changed').length, 1)
-  const downgrade = { ...player, sports: player.sports.map(item => item.sport === 'soccer' ? { ...item, skill: 'beginner' } : item) }
-  await assert.rejects(service.saveProfile(downgrade), { code: 'LEVEL_LOCKED' })
-  await service.saveProfile({ ...player, sports: player.sports.filter(item => item.sport !== 'soccer') })
-  assert.equal((await service.saveProfile(downgrade)).sports.find(item => item.sport === 'soccer').skill, 'advanced')
-})
-
-
-test('skill calculation uses the latest rating per rater and trims both extremes', async () => {
-  const { recalculateLevel } = await server.ssrLoadModule('/src/services/demoRules.ts')
-  const record = { playerId: jordan.id, sport: 'soccer', starting: 'intermediate', level: 'intermediate', verified: false, ratingCount: 0 }
-  const first = 'game-one'
-  const second = 'game-two'
-  const ratings = [
-    [maya.id, first, 1], [andre.id, first, 5], [sofia.id, second, 5],
-    [cam.id, second, 5], ['fifth-rater', first, 1], [maya.id, second, 5],
-  ]
-  const data = {
-    skillRecords: [record],
-    catalog: [{ slug: 'soccer', name: 'Soccer', fields: [] }],
-    profiles: [{ id: jordan.id, sports: [{ sport: 'soccer', skill: 'intermediate' }] }],
-    results: [{ gameId: first, status: 'final' }, { gameId: second, status: 'final' }],
-    reviews: ratings.map(([reviewerId, gameId, skillRating]) => ({
-      reviewerId, gameId, skillRating, revieweeId: jordan.id, sport: 'soccer',
-    })),
-    notices: [],
-  }
-  recalculateLevel(data, jordan.id, 'soccer')
-  assert.equal(record.level, 'advanced')
-  assert.equal(record.verified, true)
-  assert.equal(record.ratingCount, 3)
-  assert.equal(data.notices.length, 1)
-  // Intermediate-equivalent scores within the buffer do not immediately demote an advanced player.
-  data.reviews = ratings.slice(0, 3).map(([reviewerId, gameId]) => ({
-    reviewerId, gameId, skillRating: 4, revieweeId: jordan.id, sport: 'soccer',
-  }))
-  recalculateLevel(data, jordan.id, 'soccer')
-  assert.equal(record.level, 'advanced')
-  assert.equal(data.notices.length, 1)
+  const changed = { ...player, sports: player.sports.map(item => item.sport === 'soccer' ? { ...item, skill: 'beginner' } : item) }
+  assert.equal((await service.saveProfile(changed)).sports.find(item => item.sport === 'soccer').skill, 'beginner')
 })
 
 test('withdrawal outside the emergency window notifies the organizer without replacement alerts', async t => {

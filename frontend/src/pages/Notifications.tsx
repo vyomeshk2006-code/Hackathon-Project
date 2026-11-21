@@ -1,6 +1,5 @@
 
 import { Bell } from 'lucide-react'
-import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ActionNotice } from '../components/ActionNotice'
 import { LoadError, Notice, PageTitle } from '../components/ui'
@@ -55,29 +54,5 @@ export function Notifications({ session }: { session: Session }) {
             onClick={() => void action.run(() => pickup.markNotificationsRead([item.id]), 'Notification marked read.')}>Mark as read</button>}
         </div>
       </article>)}</div>)}
-  </>
-}
-
-export function Settings({ session }: { session: Session }) {
-  const { state, retry } = useResource('settings:' + session.userId, () => pickup.getNotificationPreferences())
-  const action = useAction()
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    void action.run(() => pickup.setNotificationPreferences({
-      replacementAlerts: form.has('replacements'), newGameAlerts: form.has('games'),
-    }), 'Notification preferences saved.')
-  }
-  return <>
-    <PageTitle title="Settings" action={<Link className="button secondary" to="/profile/edit">Edit profile</Link>} />
-    {state.status === 'loading' && <Notice>Loading preferences…</Notice>}
-    {state.status === 'error' && <LoadError error={state.error} retry={retry} />}
-    {state.status === 'ready' && <form className="card form-stack editor" onSubmit={submit}>
-      <h2>Notification preferences</h2>
-      <label className="check-label"><input type="checkbox" name="replacements" defaultChecked={state.data.replacementAlerts} /> Emergency replacement alerts</label>
-      <label className="check-label"><input type="checkbox" name="games" defaultChecked={state.data.newGameAlerts} /> New games near me</label>
-      <button className="button primary self-start" disabled={action.pending}>Save preferences</button>
-      <ActionNotice {...action} />
-    </form>}
   </>
 }

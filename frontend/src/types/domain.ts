@@ -12,6 +12,7 @@ export const neighborhoods = {
   'south-tampa': 'South Tampa',
   usf: 'USF Area',
   'west-tampa': 'West Tampa',
+  'ybor-city': 'Ybor City',
   'other-tampa': 'Other Tampa Area',
 } as const
 
@@ -22,7 +23,8 @@ export const skills = {
 } as const
 
 export type Sport = string
-export type Neighborhood = keyof typeof neighborhoods
+export const neighborhoodLabel = (area: string) => Object.hasOwn(neighborhoods, area) ? neighborhoods[area as keyof typeof neighborhoods] : area
+export type Neighborhood = string
 export type Skill = keyof typeof skills
 export type StatField = 'goals' | 'assists' | 'points'
 const individualStats: Record<string, readonly string[]> = {
@@ -46,29 +48,35 @@ export type Team = 'A' | 'B'
 export type TeamAssignment = { playerId: string; team: Team | null }
 export type Outcome = 'win' | 'loss' | 'draw'
 export type ResultStatus = 'pending' | 'final' | 'disputed'
-export type Preference = { sport: Sport; skill: Skill; levelSource?: 'self' | 'verified'; ratingCount?: number }
+export type Preference = { sport: Sport; skill: Skill }
 export type ProfileInput = {
   displayName: string
   neighborhood: Neighborhood
-  travelRadiusMiles: number
+  username?: string
   bio: string
   sports: Preference[]
   notificationPreferences?: NotificationPreferences
 }
 export type Profile = ProfileInput & { id: string }
+export type AccountProfileInput = ProfileInput & { phoneNumber?: string }
+export type AccountDetails = { phoneNumber: string | null }
+export type GameContact = { playerId: string; name: string; phoneNumber: string }
 export type GameInput = {
   sport: Sport
   title: string
   venue: string
-  neighborhood: Neighborhood
+  venueAddress: string
   startsAt: string
+  endsAt: string
   maxPlayers: number
   teamSize?: number | null
   joinMode?: Visibility
   skillLevel?: Skill | null
   description?: string
 }
-export type Game = GameInput & {
+export type GameEdit = Pick<GameInput, 'title' | 'venue' | 'venueAddress' | 'startsAt' | 'endsAt' | 'description'>
+export type Game = Omit<GameInput, 'endsAt'> & {
+  endsAt: string | null
   teamSize: number | null
   joinMode: Visibility
   skillLevel: Skill | null
@@ -112,13 +120,14 @@ export type PlayerDetails = Profile & RatingSummary & {
   stats: PlayerStats
   sportStats: SportStats[]
   reviews: PublicReview[]
+  skillRatings: SportSkillRating[]
 }
-export type DirectoryPlayer = Profile & RatingSummary & { distanceMiles?: number; stats: PlayerStats; sportStats: SportStats[] }
+export type DirectoryPlayer = Omit<Profile, 'notificationPreferences'> & RatingSummary & { stats: PlayerStats; sportStats: SportStats[] }
 export type GameSummary = Game & { confirmed: number; result: GameResult | null }
 export type GameDetails = GameSummary & {
   roster: (Pick<Profile, 'id' | 'displayName'> & { team: Team | null; skill?: Skill; stats: PlayerStats })[]
   participation: Participation
-  joinRequests: (JoinRequest & { playerName: string })[]
+  joinRequests: (JoinRequest & { playerName: string; username?: string; neighborhood?: string; skill?: Skill })[]
   performances: PlayerGameStat[]
   sentInvitations: (Invitation & { recipientName: string })[]
   reviewedPlayerIds: string[]
@@ -137,13 +146,26 @@ export type Invitation = {
 }
 export type InboxItem = Invitation & { game: GameSummary; senderName: string }
 export type Session = { userId: string; email: string }
-type DirectoryFilters = { sport?: Sport; neighborhood?: Neighborhood; skill?: Skill; gameId?: string; name?: string; replacement?: boolean }
-export type PlayerFilters = (DirectoryFilters & { match?: 'exact' }) |
-  (DirectoryFilters & { match: 'travel'; sport: Sport; neighborhood: Neighborhood })
+export type PlayerFilters = { sport?: Sport; skill?: Skill; gameId?: string; name?: string; replacement?: boolean }
 
-export const isUpcoming = (game: Game) =>
-  game.status === 'scheduled' && Date.parse(game.startsAt) > Date.now()
+export const isUpcoming = (game: Game, now = Date.now()) =>
+  game.status === 'scheduled' && Date.parse(game.startsAt) > now
 
+export const isActiveGame = (game: Game, now = Date.now()) =>
+  game.status === 'scheduled' && game.endsAt !== null && Date.parse(game.endsAt) > now
+
+export type SportSkillRating = {
+  sport: Sport
+  score: number | null
+  tier: Skill | null
+  provisional: boolean
+  matches: number
+  peers: number
+  peerScore: number | null
+  winRateScore: number | null
+  requiresStatNormalization: boolean
+  lastRecalculatedAt: string | null
+}
 
 export type Participation = {
   isMember: boolean
@@ -155,8 +177,8 @@ export type Participation = {
   invitationId?: string
 }
 
-export type BrowseGame = GameSummary & Participation & { organizerName: string; distanceMiles: number | null }
-export type BrowseFilters = { sport?: Sport; neighborhood?: Neighborhood; from?: string; to?: string; openSpots?: boolean }
+export type BrowseGame = GameSummary & Participation & { organizerName: string }
+export type BrowseFilters = { sportName?: string; joinMode?: Visibility; from?: string; to?: string; openSpots?: boolean }
 export type JoinDecision = 'approved' | 'declined'
 export type JoinRequest = {
   id: string; gameId: string; playerId: string; status: 'pending' | JoinDecision | 'cancelled'
@@ -171,13 +193,9 @@ export type NotificationType =
   | 'invitation_received' | 'invitation_accepted' | 'invitation_declined' | 'invitation_cancelled'
   | 'join_request_received' | 'join_request_approved' | 'join_request_declined'
   | 'player_joined' | 'player_withdrew' | 'replacement_needed' | 'replacement_joined'
-  | 'new_game_nearby' | 'game_cancelled' | 'results_submitted' | 'results_disputed'
+  | 'new_game_available' | 'game_cancelled' | 'results_submitted' | 'results_disputed'
   | 'results_confirmed' | 'level_changed' | 'squad_member_joined'
 export type Notification = {
   id: string; type: NotificationType; title: string; body: string; createdAt: string; readAt: string | null
   gameId?: string; invitationId?: string; requestId?: string; squadId?: string
 }
-export type ChatMessage = {
-  id: string; gameId: string; senderId: string; senderName: string; body: string; createdAt: string
-}
-export type ChatStatus = { lastMessageAt: string | null; lastReadAt: string | null; hasNew: boolean }

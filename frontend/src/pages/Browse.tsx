@@ -2,13 +2,13 @@
 import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ActionNotice } from '../components/ActionNotice'
-import { useCatalog } from '../components/SportPicker'
 import { GameCard, LoadError, Notice, PageTitle } from '../components/ui'
 import { useAction } from '../hooks/useAction'
+import { useGameClock } from '../hooks/useGameClock'
 import { useResource } from '../hooks/useResource'
 import { pickup } from '../services'
-import { isUpcoming, neighborhoods } from '../types/domain'
-import type { BrowseFilters, GameSummary, Neighborhood, Participation, Session } from '../types/domain'
+import { isActiveGame, isUpcoming } from '../types/domain'
+import type { BrowseFilters, GameSummary, Participation, Session, Visibility } from '../types/domain'
 
 export function ParticipationActions({ game, access, allowClaim = false }: { game: GameSummary; access: Participation; allowClaim?: boolean }) {
   const action = useAction()
@@ -47,22 +47,21 @@ export function ParticipationActions({ game, access, allowClaim = false }: { gam
 }
 
 export function BrowseGames({ session }: { session: Session }) {
-  const catalog = useCatalog()
   const [filters, setFilters] = useState<BrowseFilters>({ openSpots: false })
   const badDates = Boolean(filters.from && filters.to && filters.from > filters.to)
   const { state, retry } = useResource('browse:' + session.userId + JSON.stringify(filters),
     () => badDates ? Promise.resolve([]) : pickup.browseGames(filters))
+  const results = state.status === 'ready' ? state.data : []
+  const now = useGameClock(results.flatMap(game => [game.startsAt, game.endsAt]))
+  const active = results.filter(game => isActiveGame(game, now))
   return <>
     <PageTitle title="Browse games" action={<Link className="button primary" to="/games/new">Create a game</Link>} />
     <div className="card filter-bar expanded-filters">
-      <label>Sport<select value={filters.sport ?? ''} onChange={event => setFilters({ ...filters, sport: event.target.value || undefined })}>
-        <option value="">All sports</option>{catalog.map(sport => <option value={sport.slug} key={sport.slug}>{sport.name}</option>)}
-      </select></label>
-      <label>Neighborhood<select value={filters.neighborhood ?? ''} onChange={event => setFilters({
-        ...filters, neighborhood: (event.target.value || undefined) as Neighborhood | undefined,
-      })}>
-        <option value="">All neighborhoods</option>{Object.entries(neighborhoods).map(([id, name]) => <option value={id} key={id}>{name}</option>)}
-      </select></label>
+      <label>Search by sport<input value={filters.sportName ?? ''} onChange={event => setFilters({ ...filters, sportName: event.target.value })}
+        placeholder="Soccer, disc golf…" /></label>
+      <label>Game type<select value={filters.joinMode ?? ''} onChange={event => setFilters({
+        ...filters, joinMode: (event.target.value || undefined) as Visibility | undefined,
+      })}><option value="">All game types</option><option value="open">Open</option><option value="invite_only">Invite-only</option></select></label>
       <label>From date<input type="date" value={filters.from ?? ''} onChange={event => setFilters({ ...filters, from: event.target.value })} /></label>
       <label>Through date<input type="date" value={filters.to ?? ''} onChange={event => setFilters({ ...filters, to: event.target.value })} /></label>
       <label className="filter-check"><input type="checkbox" checked={filters.openSpots} onChange={event => setFilters({ ...filters, openSpots: event.target.checked })} /> Only games with open spots</label>
@@ -70,10 +69,10 @@ export function BrowseGames({ session }: { session: Session }) {
     {badDates ? <Notice tone="error">The end date must be on or after the start date.</Notice> :
       state.status === 'loading' ? <Notice>Finding games…</Notice> :
       state.status === 'error' ? <LoadError error={state.error} retry={retry} /> :
-      !state.data.length ? <Notice>No upcoming games match these filters.</Notice> :
-      <div className="card-grid">{state.data.map(game => <div key={game.id} className="browse-card">
+      !active.length ? <Notice>No active games match these filters.</Notice> :
+      <div className="card-grid">{active.map(game => <div key={game.id} className="browse-card">
         <GameCard game={game} />
-        <p className="muted">Hosted by {game.organizerName}{game.distanceMiles !== null && ' · ' + game.distanceMiles.toFixed(1) + ' mi away'}</p>
+        <p className="muted">Hosted by {game.organizerName}</p>
         <ParticipationActions game={game} access={game} />
       </div>)}</div>}
   </>

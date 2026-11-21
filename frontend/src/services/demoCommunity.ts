@@ -8,28 +8,14 @@ import { emit, inviteGroup, now, preferenceFor, profileFor, rosterFor, validateI
 import { requireRule } from './errors'
 
 type Methods = Pick<PickupService, 'listSports' | 'createSport' | 'notifications' | 'markNotificationsRead' |
-  'getNotificationPreferences' | 'setNotificationPreferences' | 'getChat' | 'getChatStatus' | 'markChatRead' |
-  'sendMessage' | 'subscribeToChat' | 'subscribeToNotifications' | 'mySquads' | 'createSquad' | 'joinSquad' |
+  'getNotificationPreferences' | 'setNotificationPreferences' |
+  'subscribeToNotifications' | 'mySquads' | 'createSquad' | 'joinSquad' |
   'leaveSquad' | 'removeSquadMember' | 'deleteSquad' | 'inviteSquad'>
 
 function requireProfile(data: DemoData, id: string) {
   const profile = profileFor(data, id)
   requireRule(profile, 'PROFILE_REQUIRED')
   return profile
-}
-
-function requireChat(data: DemoData, gameId: string, id: string) {
-  const game = data.games.find(row => row.id === gameId)
-  requireRule(game && rosterFor(data, gameId).some(row => row.playerId === id), 'FORBIDDEN')
-  return game
-}
-
-function setChatRead(data: DemoData, gameId: string, playerId: string) {
-  const at = now()
-  const messageId = data.messages.filter(row => row.gameId === gameId).at(-1)?.id ?? null
-  data.chatReads = data.chatReads.filter(row => row.gameId !== gameId || row.playerId !== playerId)
-  data.chatReads.push({ gameId, playerId, messageId, at })
-  return at
 }
 
 export function demoCommunity({ read, updateData, requireUser, subscribe }: DemoContext): Methods {
@@ -88,48 +74,6 @@ export function demoCommunity({ read, updateData, requireUser, subscribe }: Demo
       await updateData(data => { requireProfile(data, caller).notificationPreferences = { ...preferences } })
     },
 
-    async getChat(gameId) {
-      const id = requireUser()
-      const data = read()
-      requireChat(data, gameId, id)
-      return data.messages.filter(row => row.gameId === gameId)
-    },
-
-    async getChatStatus(gameId) {
-      const id = requireUser()
-      const data = read()
-      requireChat(data, gameId, id)
-      const last = data.messages.filter(row => row.gameId === gameId).at(-1)
-      const cursor = data.chatReads.find(row => row.gameId === gameId && row.playerId === id)
-      return {
-        lastMessageAt: last?.createdAt ?? null, lastReadAt: cursor?.at ?? null,
-        hasNew: Boolean(last && cursor?.messageId !== last.id),
-      }
-    },
-
-    async markChatRead(gameId) {
-      const id = requireUser()
-      return updateData(data => {
-        requireChat(data, gameId, id)
-        return setChatRead(data, gameId, id)
-      })
-    },
-
-    async sendMessage(gameId, input) {
-      const caller = requireUser()
-      const body = input.trim()
-      requireRule(body.length >= 1 && body.length <= 1000, 'VALIDATION', 'Enter a message of 1–1000 characters.')
-      return updateData(data => {
-        const game = requireChat(data, gameId, caller)
-        requireRule(game.status !== 'cancelled', 'GAME_UNAVAILABLE')
-        const id = crypto.randomUUID()
-        data.messages.push({ id, gameId, senderId: caller, senderName: displayName(data, caller), body, createdAt: now() })
-        setChatRead(data, gameId, caller)
-        return id
-      })
-    },
-
-    subscribeToChat(_gameId, listener) { return subscribe(listener) },
     subscribeToNotifications(listener) { return subscribe(listener) },
 
     async mySquads() {

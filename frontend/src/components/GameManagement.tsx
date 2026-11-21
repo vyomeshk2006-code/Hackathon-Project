@@ -151,6 +151,7 @@ function JoinRequestControl({ request, upcoming }: { request: GameDetails['joinR
   return <div className="preference-option">
     <div className="flex flex-wrap gap-2 items-center"><Link className="card-link" to={'/players/' + request.playerId}>{request.playerName}</Link>
       <span className="pill capitalize">{request.status}</span></div>
+    <p className="muted">{[request.username && '@' + request.username, request.neighborhood, request.skill && skills[request.skill]].filter(Boolean).join(' · ')}</p>
     {request.status === 'pending' && upcoming && <>
       <TeamPicker team={team} onChange={setTeam} />
       <div className="flex gap-2 flex-wrap">
@@ -174,7 +175,7 @@ export function WithdrawGame({ game }: { game: GameDetails }) {
   }
   return <div className="form-stack">
     {confirm ? <>
-      <p>The organizer will be notified.{lastMinute && ' Eligible nearby players may receive a replacement alert.'}</p>
+      <p>The organizer will be notified.{lastMinute && ' Eligible players may receive a replacement alert.'}</p>
       <div className="flex gap-2 flex-wrap">
         <button className="button secondary" disabled={action.pending} onClick={() => setConfirm(false)}>Keep my spot</button>
         <button className="button danger" disabled={action.pending} onClick={() => void withdraw()}>Confirm withdrawal</button>

@@ -1,15 +1,17 @@
 import { tampaInput } from '../lib/time'
-import { defaultPreferences, isUpcoming, neighborhoods, seededSports, skills } from '../types/domain'
+import { isActiveGame, isUpcoming, neighborhoodLabel, seededSports, skills } from '../types/domain'
 import type {
-  DirectoryPlayer, Game, Invitation, PlayerGameStat, Profile, Team,
+  DirectoryPlayer, Game, GameEdit, Invitation, PlayerGameStat, Skill, Team,
 } from '../types/domain'
 import type { PickupService } from './contract'
-import { displayName, finalReviews, neighborhoodDistance, ratingFor, statsFor, summary } from './demoQueries'
+import { displayName, finalReviews, ratingFor, statsFor, summary } from './demoQueries'
 import type { DemoData } from './demoQueries'
 import { requireRule } from './errors'
 import { demoParticipation } from './demoParticipation'
 import { demoCommunity } from './demoCommunity'
-import { addToRoster, canSeeGame, emit, notifyNewGame, participation, preferenceFor, profileFor, recalculateLevel, rosterFor, teamHasRoom } from './demoRules'
+import { demoAccount } from './demoAccount'
+import { skillRatingsFor } from './demoRatings'
+import { addToRoster, canSeeGame, emit, notifyNewGame, participation, preferenceFor, profileFor, requireContact, rosterFor, teamHasRoom } from './demoRules'
 
 const dataKey = 'pickup-tampa.demo.v1'
 const sessionKey = 'pickup-tampa.session.v1'
@@ -32,31 +34,32 @@ const initialData: DemoData = {
   performances: [],
   reviews: [],
   catalog: seededSports,
-  requests: [], notices: [], messages: [], chatReads: [], squads: [], withdrawals: [], alerts: [], skillRecords: [],
+  requests: [], notices: [], squads: [], withdrawals: [], alerts: [],
+  contacts: demoAccounts.map((account, index) => ({ playerId: account.id, phoneNumber: '+1202555010' + index })),
   profiles: [
     {
-      id: demoAccounts[0].id, displayName: 'Jordan Rivera', neighborhood: 'downtown',
-      travelRadiusMiles: 12, bio: 'I organize casual games after work. All skill levels welcome.',
+      id: demoAccounts[0].id, displayName: 'Jordan Rivera', username: 'jordan', neighborhood: 'downtown',
+      bio: 'I organize casual games after work. All skill levels welcome.',
       sports: [{ sport: 'soccer', skill: 'intermediate' }, { sport: 'basketball', skill: 'beginner' }],
     },
     {
-      id: demoAccounts[1].id, displayName: 'Maya Chen', neighborhood: 'usf',
-      travelRadiusMiles: 10, bio: 'Usually up for a small-sided soccer game near campus.',
+      id: demoAccounts[1].id, displayName: 'Maya Chen', username: 'maya', neighborhood: 'usf',
+      bio: 'Usually up for a small-sided soccer game near campus.',
       sports: [{ sport: 'soccer', skill: 'intermediate' }, { sport: 'volleyball', skill: 'beginner' }],
     },
     {
-      id: '10000000-0000-4000-8000-000000000003', displayName: 'Andre Lewis', neighborhood: 'south-tampa',
-      travelRadiusMiles: 15, bio: 'Weekend hoops, weeknight futsal.',
+      id: '10000000-0000-4000-8000-000000000003', displayName: 'Andre Lewis', username: 'andre', neighborhood: 'south-tampa',
+      bio: 'Weekend hoops, weeknight futsal.',
       sports: [{ sport: 'basketball', skill: 'advanced' }, { sport: 'soccer', skill: 'beginner' }],
     },
     {
-      id: '10000000-0000-4000-8000-000000000004', displayName: 'Sofia Torres', neighborhood: 'seminole-heights',
-      travelRadiusMiles: 8, bio: 'I like early games and a good doubles partner.',
+      id: '10000000-0000-4000-8000-000000000004', displayName: 'Sofia Torres', username: 'sofia', neighborhood: 'seminole-heights',
+      bio: 'I like early games and a good doubles partner.',
       sports: [{ sport: 'pickleball', skill: 'intermediate' }, { sport: 'soccer', skill: 'beginner' }],
     },
     {
-      id: '10000000-0000-4000-8000-000000000005', displayName: 'Cam Brooks', neighborhood: 'west-tampa',
-      travelRadiusMiles: 18, bio: 'Always looking for a regular volleyball group.',
+      id: '10000000-0000-4000-8000-000000000005', displayName: 'Cam Brooks', username: 'cam', neighborhood: 'west-tampa',
+      bio: 'Always looking for a regular volleyball group.',
       sports: [{ sport: 'volleyball', skill: 'advanced' }, { sport: 'basketball', skill: 'intermediate' }, { sport: 'soccer', skill: 'beginner' }],
     },
   ],
@@ -64,17 +67,29 @@ const initialData: DemoData = {
 
 function read(): DemoData {
   const stored = localStorage.getItem(dataKey)
-  const data: DemoData = stored ? { ...structuredClone(initialData), ...JSON.parse(stored) } : structuredClone(initialData)
+  const saved = stored ? JSON.parse(stored) as Partial<DemoData> & {
+    messages?: unknown; chatReads?: unknown; skillRecords?: { playerId: string; sport: string; starting: Skill }[]
+  } : undefined
+  const { messages: _messages, chatReads: _chatReads, skillRecords: legacySkills, ...legacy } = saved ?? {}
+  const data: DemoData = { ...structuredClone(initialData), ...legacy }
+  if (saved && !saved.contacts) data.contacts = []
   // Keep the original storage key and fill fields missing from v1 saves.
   return {
     ...data,
+    profiles: data.profiles.map(({ id, displayName, username, neighborhood, bio, sports, notificationPreferences }) => ({
+      id, displayName, username, neighborhood: neighborhoodLabel(neighborhood), bio, notificationPreferences,
+      sports: sports.map(({ sport, skill }) => ({
+        sport, skill: legacySkills?.find(row => row.playerId === id && row.sport === sport)?.starting ?? skill,
+      })),
+    })),
     games: data.games.map(game => ({
       ...game,
       teamSize: game.teamSize ?? null,
       joinMode: game.joinMode ?? 'invite_only',
       skillLevel: game.skillLevel ?? null,
       description: game.description ?? '',
-      neighborhood: game.neighborhood ?? data.profiles.find(profile => profile.id === game.organizerId)?.neighborhood ?? 'other-tampa',
+      venueAddress: game.venueAddress ?? '',
+      endsAt: game.endsAt && Date.parse(game.endsAt) > Date.parse(game.startsAt) ? game.endsAt : null,
     })),
     roster: data.roster.map(entry => ({
       ...entry,
@@ -92,10 +107,6 @@ function read(): DemoData {
       ...review, sport: review.sport ?? data.games.find(game => game.id === review.gameId)?.sport ?? 'unknown',
       skillRating: review.skillRating ?? null,
     })),
-    skillRecords: [...data.skillRecords, ...data.profiles.flatMap(profile => profile.sports
-      .filter(preference => !data.skillRecords.some(record => record.playerId === profile.id && record.sport === preference.sport))
-      .map(preference => ({ playerId: profile.id, sport: preference.sport, starting: preference.skill,
-        level: preference.skill, verified: false, ratingCount: 0 })))],
   }
 }
 
@@ -153,6 +164,28 @@ const integerBetween = (value: number, min: number, max: number) => Number.isInt
 const sportRank = { beginner: 1, intermediate: 2, advanced: 3 }
 const snakeOrder = ['A', 'B', 'B', 'A'] as const
 
+function parseScheduleInstant(value: string) {
+  const calendarDate = value.slice(0, 10)
+  const day = new Date(calendarDate + 'T00:00:00Z')
+  const validTime = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+  return validTime && Number.isFinite(day.valueOf()) && day.toISOString().slice(0, 10) === calendarDate ? Date.parse(value) : NaN
+}
+
+function validateGameEdit(input: GameEdit) {
+  const title = input.title.trim()
+  const venue = input.venue.trim()
+  const venueAddress = input.venueAddress.trim()
+  const description = input.description?.trim() ?? ''
+  requireRule(title.length >= 1 && title.length <= 80 && venue.length >= 1 && venue.length <= 100 &&
+    venueAddress.length >= 3 && venueAddress.length <= 200 && description.length <= 500,
+    'VALIDATION', 'Enter a title, venue name, and exact venue address.')
+  const start = parseScheduleInstant(input.startsAt)
+  const end = parseScheduleInstant(input.endsAt)
+  requireRule(start > Date.now() && end > start,
+    'VALIDATION', 'Choose a future start and an end time after the start.')
+  return { title, venue, venueAddress, description, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() }
+}
+
 function organizedGame(data: DemoData, id: string, userId: string) {
   const game = data.games.find(game => game.id === id && game.organizerId === userId)
   requireRule(game, 'FORBIDDEN')
@@ -199,6 +232,7 @@ const context = { read, updateData, requireUser, subscribe: (listener: () => voi
 export const demoService: PickupService = {
   ...demoParticipation(context),
   ...demoCommunity(context),
+  ...demoAccount(context),
   async getSession() {
     return currentUser()
   },
@@ -244,50 +278,16 @@ export const demoService: PickupService = {
     const reviews = finalReviews(data, id).reverse().map(({ id, sport, rating, skillRating, comment }) => ({
       id, sport, rating, skillRating, comment,
     }))
-    return { ...profile, ...statsFor(data, id), ...ratingFor(data, id), reviews }
-  },
-
-  async saveProfile(input) {
-    const id = requireUser()
-    const profile: Profile = { ...input, id, displayName: input.displayName.trim(), bio: input.bio.trim() }
-    requireRule(profile.displayName.length > 0 && profile.displayName.length <= 60 && profile.bio.length <= 300,
-      'VALIDATION', 'Enter a name of 1–60 characters and a bio of up to 300 characters.')
-    requireRule(Object.hasOwn(neighborhoods, profile.neighborhood) && integerBetween(profile.travelRadiusMiles, 1, 50),
-      'VALIDATION', 'Choose a neighborhood and a travel radius from 1 to 50 miles.')
-    requireRule(profile.sports.length > 0 && new Set(profile.sports.map(item => item.sport)).size === profile.sports.length &&
-      profile.sports.every(item => Object.hasOwn(skills, item.skill)),
-      'VALIDATION', 'Choose at least one sport with a skill level. Select each sport once.')
-    return updateData(data => {
-      requireRule(profile.sports.every(item => data.catalog.some(sport => sport.slug === item.sport)), 'VALIDATION', 'Choose a sport from the catalog.')
-      const preferences = input.notificationPreferences ?? profileFor(data, id)?.notificationPreferences ?? defaultPreferences
-      requireRule(typeof preferences.replacementAlerts === 'boolean' && typeof preferences.newGameAlerts === 'boolean', 'VALIDATION')
-      profile.notificationPreferences = { ...preferences }
-      profile.sports = profile.sports.map(item => {
-        const record = data.skillRecords.find(row => row.playerId === id && row.sport === item.sport)
-        if (record?.verified) {
-          requireRule(!preferenceFor(profileFor(data, id), item.sport) || record.level === item.skill, 'LEVEL_LOCKED')
-          return { sport: item.sport, skill: record.level, levelSource: 'verified', ratingCount: record.ratingCount }
-        }
-        if (record) {
-          record.starting = item.skill
-          record.level = item.skill
-        } else {
-          data.skillRecords.push({ playerId: id, sport: item.sport, starting: item.skill, level: item.skill, verified: false, ratingCount: 0 })
-        }
-        return { sport: item.sport, skill: item.skill, levelSource: 'self', ratingCount: record?.ratingCount ?? 0 }
-      })
-      data.profiles = [...data.profiles.filter(existing => existing.id !== id), profile]
-      return profile
-    })
+    const totals = statsFor(data, id)
+    return { ...profile, ...totals, ...ratingFor(data, id), reviews, skillRatings: skillRatingsFor(data, id, totals.sportStats) }
   },
 
   async findPlayers(filters) {
     const id = requireUser()
     const data = read()
-    const { sport, neighborhood, skill, gameId, match } = filters
+    const { sport, skill, gameId } = filters
     const name = filters.name?.trim().toLowerCase()
-    requireRule((!sport || data.catalog.some(item => item.slug === sport)) && (!neighborhood || Object.hasOwn(neighborhoods, neighborhood)) &&
-      (!skill || Object.hasOwn(skills, skill)) && (match !== 'travel' || (sport && neighborhood)), 'VALIDATION')
+    requireRule((!sport || data.catalog.some(item => item.slug === sport)) && (!skill || Object.hasOwn(skills, skill)), 'VALIDATION')
 
     if (gameId) organizedGame(data, gameId, id)
     const unavailable = new Set<string>()
@@ -301,48 +301,46 @@ export const demoService: PickupService = {
 
     const matches: DirectoryPlayer[] = []
     for (const profile of data.profiles) {
-      if (profile.id === id || unavailable.has(profile.id) || (name && !profile.displayName.toLowerCase().includes(name))) continue
+      if (profile.id === id || unavailable.has(profile.id) || (name &&
+        !profile.displayName.toLowerCase().includes(name) && !profile.username?.includes(name.replace(/^@/, '')))) continue
       if ((sport || skill) && !profile.sports.some(item => (!sport || item.sport === sport) && (!skill || item.skill === skill))) continue
-      const distance = match === 'travel' ? neighborhoodDistance(profile.neighborhood, filters.neighborhood) : undefined
-      if (distance !== undefined ? distance > profile.travelRadiusMiles : neighborhood && profile.neighborhood !== neighborhood) continue
-      matches.push({
-        ...profile,
-        ...ratingFor(data, profile.id),
-        ...statsFor(data, profile.id),
-        distanceMiles: distance === undefined ? undefined : Math.round(distance * 10) / 10,
-      })
+      const { notificationPreferences: _privatePreferences, ...publicProfile } = profile
+      matches.push({ ...publicProfile, ...ratingFor(data, profile.id), ...statsFor(data, profile.id) })
     }
-
-    return matches.sort((a, b) => {
-      const byName = a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id)
-      if (match !== 'travel') return byName
-      return (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0) || (b.avgRating ?? 0) - (a.avgRating ?? 0) || byName
-    })
+    return matches.sort((a, b) => a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id))
   },
 
   async createGame(input) {
     const organizerId = requireUser()
     const game: Game = {
-      ...input, title: input.title.trim(), venue: input.venue.trim(),
+      ...validateGameEdit(input), sport: input.sport, maxPlayers: input.maxPlayers,
       teamSize: input.teamSize ?? null, joinMode: input.joinMode ?? 'invite_only',
-      skillLevel: input.skillLevel ?? null, description: input.description?.trim() ?? '',
+      skillLevel: input.skillLevel ?? null,
       id: crypto.randomUUID(), organizerId, status: 'scheduled',
     }
-    requireRule(Object.hasOwn(neighborhoods, game.neighborhood) && game.description.length <= 500 &&
-      (game.joinMode === 'open' || game.joinMode === 'invite_only') && (!game.skillLevel || Object.hasOwn(skills, game.skillLevel)) &&
-      game.title.length > 0 && game.title.length <= 80 && game.venue.length > 0 && game.venue.length <= 100 &&
-      /(?:Z|[+-]\d{2}:\d{2})$/i.test(game.startsAt) && isUpcoming(game),
-      'VALIDATION', 'Choose a sport, name, venue, neighborhood, and future start time.')
+    requireRule((game.joinMode === 'open' || game.joinMode === 'invite_only') &&
+      (!game.skillLevel || Object.hasOwn(skills, game.skillLevel)), 'VALIDATION')
     requireRule(integerBetween(game.maxPlayers, 2, 50), 'VALIDATION', 'Set capacity between 2 and 50 players.')
     requireRule(game.teamSize === null || (integerBetween(game.teamSize, 1, 25) && game.maxPlayers === game.teamSize * 2),
       'VALIDATION', 'Maximum players must be twice the team size.')
     return updateData(data => {
       requireRule(data.profiles.some(profile => profile.id === organizerId), 'PROFILE_REQUIRED')
+      requireContact(data, organizerId)
       requireRule(data.catalog.some(sport => sport.slug === game.sport), 'VALIDATION', 'Choose a sport from the catalog.')
       data.games.push(game)
       data.roster.push({ gameId: game.id, playerId: organizerId, team: null, joinedAt: now() })
       notifyNewGame(data, game)
       return game.id
+    })
+  },
+
+  async editGame(gameId, input) {
+    const caller = requireUser()
+    await updateData(data => {
+      const game = organizedGame(data, gameId, caller)
+      requireRule(isUpcoming(game), 'GAME_UNAVAILABLE', 'Edit game details before kickoff.')
+      requireContact(data, caller)
+      Object.assign(game, validateGameEdit(input))
     })
   },
 
@@ -369,7 +367,11 @@ export const demoService: PickupService = {
       ...summary(data, game, onRoster),
       participation: participation(data, game, userId),
       joinRequests: organizer ? data.requests.filter(row => row.gameId === id).reverse()
-        .map(row => ({ ...row, playerName: displayName(data, row.playerId) })) : [],
+        .map(row => {
+          const applicant = profileFor(data, row.playerId)
+          return { ...row, playerName: displayName(data, row.playerId), username: applicant?.username,
+            neighborhood: applicant?.neighborhood, skill: preferenceFor(applicant, game.sport)?.skill }
+        }) : [],
       roster: entries.map(entry => ({
         id: entry.playerId, displayName: displayName(data, entry.playerId), team: entry.team,
         skill: preferenceFor(profileFor(data, entry.playerId), game.sport)?.skill,
@@ -405,7 +407,10 @@ export const demoService: PickupService = {
       requireRule(invite.status === 'pending', 'INVITATION_CLOSED')
       const game = data.games.find(game => game.id === invite.gameId)
       requireRule(game && isUpcoming(game), 'GAME_UNAVAILABLE')
-      if (response === 'accepted') addToRoster(data, game, recipientId, invite.team)
+      if (response === 'accepted') {
+        requireRule(isActiveGame(game), 'GAME_UNAVAILABLE')
+        addToRoster(data, game, recipientId, invite.team)
+      }
       closeInvitation(invite, response)
       emit(data, game.organizerId, response === 'accepted' ? 'invitation_accepted' : 'invitation_declined',
         response === 'accepted' ? 'Invitation accepted' : 'Invitation declined',
@@ -525,7 +530,6 @@ export const demoService: PickupService = {
       closePending(data, gameId, 'expired')
       closeRequests(data, gameId)
       for (const row of roster) {
-        if (previous?.status === 'final') recalculateLevel(data, row.playerId, game.sport)
         if (row.playerId !== caller) emit(data, row.playerId, 'results_submitted', 'Results ready for review', game.title, { gameId })
       }
       return 'pending'
@@ -543,7 +547,6 @@ export const demoService: PickupService = {
       result.confirmedAt = now()
       const game = data.games.find(row => row.id === gameId)!
       for (const row of rosterFor(data, gameId)) {
-        recalculateLevel(data, row.playerId, game.sport)
         emit(data, row.playerId, 'results_confirmed', 'Results confirmed', game.title, { gameId })
       }
       return 'final'
@@ -578,7 +581,6 @@ export const demoService: PickupService = {
       const id = crypto.randomUUID()
       const sport = data.games.find(game => game.id === gameId)!.sport
       data.reviews.push({ id, gameId, reviewerId, revieweeId, rating, skillRating: skillRating ?? null, sport, comment, createdAt: now() })
-      recalculateLevel(data, revieweeId, sport)
       return id
     })
   },

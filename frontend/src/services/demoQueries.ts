@@ -1,24 +1,19 @@
 import type {
-  Game, GameResult, GameSummary, Invitation, Neighborhood, PlayerGameStat,
+  Game, GameResult, GameSummary, Invitation, PlayerGameStat,
   PlayerStats, Profile, RatingSummary, Review, SportStats, TeamAssignment,
-  Notification, ChatMessage, JoinRequest, Skill, Sport, SportDefinition, Squad, Team,
+  Notification, JoinRequest, SportDefinition, Squad, Team,
 } from '../types/domain'
 
 export type Account = { id: string; email: string; salt: string; verifier: string }
 export type RosterEntry = TeamAssignment & { gameId: string; joinedAt: string }
-export type SkillRecord = {
-  playerId: string; sport: Sport; starting: Skill; level: Skill; verified: boolean; ratingCount: number
-}
 export type DemoData = {
   catalog: SportDefinition[]
   requests: JoinRequest[]
   notices: (Notification & { userId: string })[]
-  messages: ChatMessage[]
-  chatReads: { gameId: string; playerId: string; messageId: string | null; at: string }[]
   squads: (Omit<Squad, 'members'> & { memberIds: string[] })[]
   withdrawals: { id: string; gameId: string; playerId: string; team: Team | null; at: string; lastMinute: boolean }[]
   alerts: { gameId: string; withdrawalId: string; playerId: string; team: Team | null }[]
-  skillRecords: SkillRecord[]
+  contacts: { playerId: string; phoneNumber: string }[]
   accounts: Account[]
   profiles: Profile[]
   games: Game[]
@@ -27,24 +22,6 @@ export type DemoData = {
   results: GameResult[]
   performances: PlayerGameStat[]
   reviews: Review[]
-}
-
-const centers: Record<Neighborhood, readonly [number, number]> = {
-  downtown: [27.9490, -82.4572],
-  'seminole-heights': [27.9963, -82.4514],
-  'south-tampa': [27.9065, -82.4950],
-  usf: [28.0587, -82.4139],
-  'west-tampa': [27.9623, -82.4860],
-  'other-tampa': [27.9780, -82.4580],
-}
-
-export function neighborhoodDistance(from: Neighborhood, to: Neighborhood) {
-  const [fromLat, fromLng] = centers[from]
-  const [toLat, toLng] = centers[to]
-  const radians = Math.PI / 180
-  const arc = Math.sin((toLat - fromLat) * radians / 2) ** 2 +
-    Math.cos(fromLat * radians) * Math.cos(toLat * radians) * Math.sin((toLng - fromLng) * radians / 2) ** 2
-  return 2 * 3958.76 * Math.asin(Math.sqrt(arc))
 }
 
 export function ratingFor(data: DemoData, id: string): RatingSummary {

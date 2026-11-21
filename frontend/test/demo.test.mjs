@@ -32,18 +32,20 @@ async function signUpPlayer(email, displayName, options = {}) {
   const session = await service.signUp(email, password)
   assert.equal(await service.getProfile(session.userId), null)
   await service.saveProfile({
-    displayName, neighborhood: 'usf', travelRadiusMiles: 10, bio: '',
+    displayName, username: email.split('@')[0].replaceAll('-', '_'), phoneNumber: '+12025550142', neighborhood: 'usf', bio: '',
     sports: [{ sport: 'soccer', skill: 'intermediate' }],
     ...options,
   })
   return session.userId
 }
 
-const createSoccerGame = (options = {}) => service.createGame({
-  sport: 'soccer', title: 'After-work soccer', venue: 'Tampa field', neighborhood: 'downtown', maxPlayers: 2,
-  startsAt: new Date(Date.now() + 86_400_000).toISOString(),
-  ...options,
-})
+const createSoccerGame = (options = {}) => {
+  const startsAt = options.startsAt ?? new Date(Date.now() + 86_400_000).toISOString()
+  return service.createGame({
+    sport: 'soccer', title: 'After-work soccer', venue: 'Tampa field', venueAddress: '100 Example Ave, Tampa, FL',
+    maxPlayers: 2, startsAt, endsAt: new Date(Date.parse(startsAt) + 90 * 60_000).toISOString(), ...options,
+  })
+}
 
 test('signup, onboarding, filters, invitation, and updated roster', async () => {
   await assert.rejects(service.myGames(), /Log in/)
@@ -52,8 +54,8 @@ test('signup, onboarding, filters, invitation, and updated roster', async () => 
   await assert.rejects(service.signIn('player@example.test', 'wrong'), /incorrect/)
 
   signInAsDemoAccount(jordan.id)
-  const results = await service.findPlayers({ sport: 'soccer', neighborhood: 'usf' })
-  assert.deepEqual(results.map(player => player.displayName), ['Alex Demo', 'Maya Chen'])
+  const results = await service.findPlayers({ sport: 'soccer', name: 'alex' })
+  assert.deepEqual(results.map(player => player.displayName), ['Alex Demo'])
   const gameId = await createSoccerGame()
   const invitation = await service.invite(gameId, playerId)
   assert.equal(await service.invite(gameId, playerId), invitation)
@@ -92,23 +94,18 @@ test('a full game keeps the competing invitation pending and allows decline', as
   await assert.rejects(service.invite(gameId, playerId), { code: 'INVITATION_CLOSED' })
 })
 
-test('radius-aware search applies individual travel limits and skips pending invitees and roster members', async () => {
-  const limited = await signUpPlayer('nearby@example.test', 'Limited Radius', { travelRadiusMiles: 1 })
+test('player search uses sport and name with no geographic exclusion and skips invited or rostered players', async () => {
+  const distant = await signUpPlayer('distant@example.test', 'Distant Player', { neighborhood: 'Custom Area' })
   signInAsDemoAccount(jordan.id)
-  const gameId = await createSoccerGame()
-  const search = { match: 'travel', sport: 'soccer', neighborhood: 'downtown', gameId }
-  let results = await service.findPlayers(search)
-  assert.equal(results.some(row => row.id === limited), false)
-  const match = results.find(row => row.id === maya.id)
-  assert.ok(match.distanceMiles > 0 && match.distanceMiles <= match.travelRadiusMiles)
-  assert.equal(match.distanceMiles, Number(match.distanceMiles.toFixed(1)))
-  assert.equal(match.avgRating, null)
-  assert.deepEqual(results.map(row => row.distanceMiles), results.map(row => row.distanceMiles).sort((a, b) => a - b))
+  const game = await createSoccerGame()
+  const search = { sport: 'soccer', gameId: game }
+  const matches = await service.findPlayers(search)
+  assert.ok(matches.some(row => row.id === distant && row.neighborhood === 'Custom Area'))
+  assert.ok(matches.some(row => row.id === maya.id && row.neighborhood === 'USF Area'))
+  assert.equal(matches.some(row => 'distanceMiles' in row || 'phoneNumber' in row), false)
   assert.equal((await service.findPlayers({ ...search, skill: 'advanced' })).length, 0)
-
-  const invitation = await service.invite(gameId, maya.id)
-  results = await service.findPlayers(search)
-  assert.equal(results.some(row => row.id === maya.id), false)
+  const invitation = await service.invite(game, maya.id)
+  assert.equal((await service.findPlayers(search)).some(row => row.id === maya.id), false)
   signInAsDemoAccount(maya.id)
   await service.respond(invitation, 'accepted')
   signInAsDemoAccount(jordan.id)
@@ -233,7 +230,10 @@ test('v1 browser saves retain roster and gain defaults for the v2 fields', async
   }))
   signInAsDemoAccount(jordan.id)
   const game = await service.getGame('old-game')
-  assert.equal(game.neighborhood, 'west-tampa')
+  assert.equal(game.endsAt, null)
+  assert.equal(game.venueAddress, '')
+  assert.equal((await service.getProfile(jordan.id)).neighborhood, 'West Tampa')
+  assert.equal((await service.browseGames()).length, 0)
   assert.equal(game.roster[0].team, null)
   assert.equal(game.result, null)
   assert.equal((await service.getPlayerDetails(jordan.id)).reviewCount, 0)

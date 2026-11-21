@@ -4,13 +4,13 @@ import type { LucideIcon } from 'lucide-react'
 import { useCatalog } from './SportPicker'
 import { Link } from 'react-router-dom'
 import { formatGameTime } from '../lib/time'
-import { neighborhoods, skills, sportName } from '../types/domain'
+import { isUpcoming, skills, sportName } from '../types/domain'
 import type { GameSummary, Sport } from '../types/domain'
 
 const sportIcons: Partial<Record<string, LucideIcon>> = { soccer: Goal, basketball: Dribbble, volleyball: Volleyball, pickleball: CircleDot }
 
 export function SportIcon({ sport }: { sport: Sport }) {
-  const Icon = sportIcons[sport] ?? CircleDot
+  const Icon = (Object.hasOwn(sportIcons, sport) ? sportIcons[sport] : undefined) ?? CircleDot
   return <Icon size={21} aria-hidden="true" />
 }
 
@@ -56,8 +56,21 @@ export function GameCard({ game }: { game: GameSummary }) {
         {game.teamSize && ' · ' + game.teamSize + 'v' + game.teamSize}</p>
       <h3><Link className="card-link" to={`/games/${game.id}`}>{game.title}</Link></h3>
       <p className="icon-line"><CalendarDays size={17} aria-hidden="true" />{formatGameTime(game.startsAt)}</p>
-      <p className="icon-line"><MapPin size={17} aria-hidden="true" />{game.venue} · {neighborhoods[game.neighborhood]}</p>
+      {game.status === 'scheduled' && !isUpcoming(game) && <span className="pill">{game.endsAt && Date.parse(game.endsAt) > Date.now() ? 'Ongoing' : 'Past'}</span>}
+      <VenueDetails venue={game.venue} address={game.venueAddress} />
+      {game.endsAt && <p className="muted">Ends {formatGameTime(game.endsAt)}</p>}
       {game.result && <p className="muted">Team A {game.result.teamAScore}–{game.result.teamBScore} Team B · {game.result.status === 'pending' ? 'Awaiting confirmation' : game.result.status}</p>}
     </article>
   )
+}
+
+
+export function VenueDetails({ venue, address }: { venue: string; address: string }) {
+  return <div>
+    <p className="icon-line"><MapPin size={17} aria-hidden="true" />{venue}</p>
+    {address && <><p className="venue-address">{address}</p>
+      <a className="text-link" href={'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(address)}
+        target="_blank" rel="noopener noreferrer">Open directions<span className="sr-only"> to {venue} (opens a new tab)</span></a>
+    </>}
+  </div>
 }

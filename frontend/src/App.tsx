@@ -4,10 +4,10 @@ import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { LoadError, Notice, PageTitle } from './components/ui'
 import { CatalogProvider } from './components/SportPicker'
 import { BrowseGames } from './pages/Browse'
-import { NotificationBell, Notifications, Settings } from './pages/Notifications'
+import { NotificationBell, Notifications } from './pages/Notifications'
 import { Squads } from './pages/Squads'
 import { errorMessage, useResource } from './hooks/useResource'
-import { CreateGame, Dashboard, GameDetail, Invitations, MyGames } from './pages/Games'
+import { CreateGame, Dashboard, EditGame, GameDetail, Invitations, MyGames } from './pages/Games'
 import { Discovery, PlayerProfile, ProfileEditor } from './pages/Players'
 import { AuthPage, Landing } from './pages/PublicPages'
 import { demo, pickup } from './services'
@@ -84,8 +84,9 @@ function AppPages({ session }: { session: Session | null }) {
       <Route path="/games" element={<MyGames session={session} />} />
       <Route path="/squads" element={<Squads session={session} profile={profile} />} />
       <Route path="/notifications" element={<Notifications session={session} />} />
-      <Route path="/settings" element={<Settings session={session} />} />
+      <Route path="/settings" element={<ProfileEditor key={profile.id} profile={profile} settings />} />
       <Route path="/games/new" element={<CreateGame />} />
+      <Route path="/games/:id/edit" element={<EditGame session={session} />} />
       <Route path="/invitations" element={<Invitations session={session} />} />
       <Route path="*" element={<><PageTitle title="Page unavailable" /><Link className="button secondary" to="/home">Back to dashboard</Link></>} />
     </Routes>

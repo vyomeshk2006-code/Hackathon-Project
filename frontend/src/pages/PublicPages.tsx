@@ -31,7 +31,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         <h2 id="how-heading">Get a game going</h2>
         <div className="card-grid">
           <article className="card step"><CalendarPlus aria-hidden="true" /><h3>Set the game</h3><p>Pick a sport, a Tampa venue, and a time.</p></article>
-          <article className="card step"><Search aria-hidden="true" /><h3>Find players</h3><p>Browse by sport and neighborhood, then invite someone to play.</p></article>
+          <article className="card step"><Search aria-hidden="true" /><h3>Find players</h3><p>Browse by sport and skill, then invite someone to play.</p></article>
           <article className="card step"><UsersRound aria-hidden="true" /><h3>Fill the roster</h3><p>See who has accepted and how many spots are open.</p></article>
         </div>
       </section>

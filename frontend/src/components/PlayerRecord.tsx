@@ -32,6 +32,7 @@ export function PlayerRecord({ profile }: { profile: PlayerDetails }) {
   const preference = profile.sports.find(item => item.sport === selected)
   const fields = catalog.find(item => item.slug === selected)?.fields ?? []
   const reviews = profile.reviews.filter(item => item.sport === selected)
+  const rating = profile.skillRatings.find(item => item.sport === selected)
   return <>
     <section className="card form-stack">
       <h2>Player statistics</h2>
@@ -42,8 +43,15 @@ export function PlayerRecord({ profile }: { profile: PlayerDetails }) {
           {options.map(value => <option value={value} key={value}>{sportName(value, catalog)}</option>)}
         </select></label>
         <h3>{sportName(selected, catalog)}</h3>
-        {preference && <p>{skills[preference.skill]} · {preference.levelSource === 'verified'
-          ? 'Verified by ' + preference.ratingCount + ' players' : 'Self-rated'}</p>}
+        {preference && <p>Self-declared skill · {skills[preference.skill]}</p>}
+        {rating && <div className="preference-option">
+          <h3>Computed skill rating</h3>
+          {rating.score !== null && rating.tier && <p><strong>{rating.score} / 100 · {skills[rating.tier]}</strong></p>}
+          {rating.provisional && <span className="pill">Provisional</span>}
+          <p className="muted">{rating.matches} confirmed {rating.matches === 1 ? 'match' : 'matches'} · {rating.peers} eligible {rating.peers === 1 ? 'peer' : 'peers'}</p>
+          {rating.requiresStatNormalization ? <p className="muted">Scoring awaits approved benchmarks for this sport’s individual statistics.</p> :
+            rating.provisional && <p className="muted">A settled tier requires five confirmed matches and three distinct eligible peers.</p>}
+        </div>}
         {(!totals || !totals.gamesPlayed) && <p className="muted">No finalized matches in this sport yet.</p>}
         <StatGrid stats={totals} fields={fields} />
       </div>}
