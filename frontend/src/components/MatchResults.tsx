@@ -3,7 +3,8 @@ import type { FormEvent } from 'react'
 import { useAction } from '../hooks/useAction'
 import { tampaInput } from '../lib/time'
 import { pickup } from '../services'
-import { sportStatFields } from '../types/domain'
+import { statLabel } from '../types/domain'
+import { useCatalog } from './SportPicker'
 import type { GameDetails, GameResult, Performance } from '../types/domain'
 import { ActionNotice } from './ActionNotice'
 import { Notice } from './ui'
@@ -12,13 +13,13 @@ const statusLabel = { pending: 'Awaiting confirmation', final: 'Final', disputed
 
 function ResultsForm({ game, onSave }: { game: GameDetails; onSave: () => void }) {
   const action = useAction()
-  const fields = sportStatFields[game.sport]
+  const fields = useCatalog().find(sport => sport.slug === game.sport)?.fields ?? []
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const performances = fields.length ? game.roster.map(player => {
-      const row: Performance = { playerId: player.id }
-      for (const field of fields) row[field] = Number(form.get(`${player.id}:${field}`))
+      const row: Performance = { playerId: player.id, metrics: Object.fromEntries(fields.map(field =>
+        [field, Number(form.get(player.id + ':' + field))])) }
       return row
     }) : []
     const accepted = await action.run(() => pickup.submitResults(game.id, {
@@ -41,9 +42,9 @@ function ResultsForm({ game, onSave }: { game: GameDetails; onSave: () => void }
             return <fieldset className="preference-option" key={player.id}>
               <legend>{player.displayName} · Team {player.team}</legend>
               {fields.map(field => (
-                <label key={field}><span className="capitalize">{field}</span>
+                <label key={field}><span className="capitalize">{statLabel(field)}</span>
                   <input name={`${player.id}:${field}`} type="number" min={0} max={32767}
-                    defaultValue={current?.[field] ?? 0} />
+                    defaultValue={current?.metrics[field] ?? 0} />
                 </label>
               ))}
             </fieldset>
@@ -57,7 +58,7 @@ function ResultsForm({ game, onSave }: { game: GameDetails; onSave: () => void }
 }
 
 function Scorecard({ game, result }: { game: GameDetails; result: GameResult }) {
-  const fields = sportStatFields[game.sport]
+  const fields = useCatalog().find(sport => sport.slug === game.sport)?.fields ?? []
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -70,11 +71,11 @@ function Scorecard({ game, result }: { game: GameDetails; result: GameResult }) 
         <table className="stats-table">
           <caption>Player performance · Revision {result.revision}</caption>
           <thead><tr><th scope="col">Player</th><th scope="col">Team</th><th scope="col">Outcome</th>
-            {fields.map(field => <th scope="col" className="capitalize" key={field}>{field}</th>)}</tr></thead>
+            {fields.map(field => <th scope="col" className="capitalize" key={field}>{statLabel(field)}</th>)}</tr></thead>
           <tbody>{game.performances.map(row => <tr key={row.playerId}>
             <th scope="row">{game.roster.find(player => player.id === row.playerId)?.displayName}</th>
             <td>{row.team}</td><td className="capitalize">{row.outcome}</td>
-            {fields.map(field => <td key={field}>{row[field]}</td>)}
+            {fields.map(field => <td key={field}>{row.metrics[field] ?? 0}</td>)}
           </tr>)}</tbody>
         </table>
       </div>}
@@ -116,24 +117,30 @@ function GameReviews({ game, userId }: { game: GameDetails; userId: string }) {
     const element = event.currentTarget
     const form = new FormData(element)
     const saved = await action.run(() => pickup.submitReview(game.id, {
-      revieweeId: String(form.get('reviewee')), rating: Number(form.get('rating')), comment: String(form.get('comment')),
+      revieweeId: String(form.get('reviewee')), rating: Number(form.get('rating')),
+      skillRating: Number(form.get('skillRating')), comment: String(form.get('comment')),
     }), 'Review posted to the player’s profile.')
     if (saved) element.reset()
   }
   return (
     <section className="card form-stack editor">
       <h2>Review a player</h2>
+      <p className="muted">Reviews are anonymous and open to teammates and opponents.</p>
       {eligible.length ? <form className="form-stack" onSubmit={submit}>
         <div className="form-grid">
           <label>Player to review<select name="reviewee" required defaultValue="">
             <option value="" disabled>Choose a player</option>
             {eligible.map(player => <option key={player.id} value={player.id}>{player.displayName}</option>)}
           </select></label>
-          <label>Rating<select name="rating" required defaultValue="">
+          <label>Sportsmanship rating<select name="rating" required defaultValue="">
             <option value="" disabled>Choose a rating</option>
             {[5, 4, 3, 2, 1].map(rating => <option key={rating} value={rating}>{rating} / 5</option>)}
           </select></label>
         </div>
+        <label>Skill rating<select name="skillRating" required defaultValue="">
+          <option value="" disabled>Choose a rating</option>
+          {[5, 4, 3, 2, 1].map(rating => <option key={rating} value={rating}>{rating} / 5</option>)}
+        </select></label>
         <label>Comment (optional)<textarea name="comment" maxLength={500} rows={3} /></label>
         <button className="button primary self-start" disabled={action.pending}>Post review</button>
       </form> : <p className="muted">You’ve reviewed every other player from this game.</p>}

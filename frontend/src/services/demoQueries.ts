@@ -1,11 +1,24 @@
 import type {
   Game, GameResult, GameSummary, Invitation, Neighborhood, PlayerGameStat,
   PlayerStats, Profile, RatingSummary, Review, SportStats, TeamAssignment,
+  Notification, ChatMessage, JoinRequest, Skill, Sport, SportDefinition, Squad, Team,
 } from '../types/domain'
 
 export type Account = { id: string; email: string; salt: string; verifier: string }
 export type RosterEntry = TeamAssignment & { gameId: string; joinedAt: string }
+export type SkillRecord = {
+  playerId: string; sport: Sport; starting: Skill; level: Skill; verified: boolean; ratingCount: number
+}
 export type DemoData = {
+  catalog: SportDefinition[]
+  requests: JoinRequest[]
+  notices: (Notification & { userId: string })[]
+  messages: ChatMessage[]
+  chatReads: { gameId: string; playerId: string; messageId: string | null; at: string }[]
+  squads: (Omit<Squad, 'members'> & { memberIds: string[] })[]
+  withdrawals: { id: string; gameId: string; playerId: string; team: Team | null; at: string; lastMinute: boolean }[]
+  alerts: { gameId: string; withdrawalId: string; playerId: string; team: Team | null }[]
+  skillRecords: SkillRecord[]
   accounts: Account[]
   profiles: Profile[]
   games: Game[]
@@ -35,13 +48,13 @@ export function neighborhoodDistance(from: Neighborhood, to: Neighborhood) {
 }
 
 export function ratingFor(data: DemoData, id: string): RatingSummary {
-  const reviews = data.reviews.filter(review => review.revieweeId === id)
+  const reviews = finalReviews(data, id)
   const sum = reviews.reduce((total, review) => total + review.rating, 0)
   return { avgRating: reviews.length ? Math.round(sum * 100 / reviews.length) / 100 : null, reviewCount: reviews.length }
 }
 
 const zeroStats = (): PlayerStats => ({
-  gamesPlayed: 0, wins: 0, losses: 0, draws: 0, goals: 0, points: 0, assists: 0,
+  gamesPlayed: 0, wins: 0, losses: 0, draws: 0, goals: 0, points: 0, assists: 0, metrics: {},
 })
 
 function record(stats: PlayerStats, row: PlayerGameStat) {
@@ -52,6 +65,7 @@ function record(stats: PlayerStats, row: PlayerGameStat) {
   stats.goals += row.goals
   stats.points += row.points
   stats.assists += row.assists
+  for (const [key, value] of Object.entries(row.metrics)) stats.metrics[key] = (stats.metrics[key] ?? 0) + value
 }
 
 export function statsFor(data: DemoData, playerId: string) {
@@ -80,4 +94,10 @@ export function summary(data: DemoData, game: Game, includeResult = false): Game
 
 export function displayName(data: DemoData, id: string) {
   return data.profiles.find(profile => profile.id === id)?.displayName ?? 'Player'
+}
+
+
+export function finalReviews(data: DemoData, playerId: string) {
+  const final = new Set(data.results.filter(result => result.status === 'final').map(result => result.gameId))
+  return data.reviews.filter(review => review.revieweeId === playerId && final.has(review.gameId))
 }

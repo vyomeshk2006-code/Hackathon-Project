@@ -2,6 +2,10 @@ import { Goal } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { LoadError, Notice, PageTitle } from './components/ui'
+import { CatalogProvider } from './components/SportPicker'
+import { BrowseGames } from './pages/Browse'
+import { NotificationBell, Notifications, Settings } from './pages/Notifications'
+import { Squads } from './pages/Squads'
 import { errorMessage, useResource } from './hooks/useResource'
 import { CreateGame, Dashboard, GameDetail, Invitations, MyGames } from './pages/Games'
 import { Discovery, PlayerProfile, ProfileEditor } from './pages/Players'
@@ -25,12 +29,16 @@ function Header({ session }: { session: Session | null }) {
         <Link className="brand" to="/" aria-label="Pickup Sports Tampa home"><span className="brand-icon"><Goal size={23} aria-hidden="true" /></span><span>PICKUP <span>TAMPA</span></span></Link>
         {session ? <>
           <nav aria-label="Main navigation" className="app-nav">
-            <NavLink to="/home">Home</NavLink>
+            <NavLink to="/home">Dashboard</NavLink>
+            <NavLink to="/browse">Browse games</NavLink>
             <NavLink to="/players">Find players</NavLink>
             <NavLink to="/games">My games</NavLink>
             <NavLink to="/invitations">Invitations</NavLink>
+            <NavLink to="/squads">Squads</NavLink>
           </nav>
           <div className="account-actions">
+            <NotificationBell session={session} />
+            <NavLink className="text-link" to="/settings">Settings</NavLink>
             <Link className="text-link" to={`/players/${session.userId}`}>Profile</Link>
             <button className="button secondary" onClick={() => void logout()}>Log out</button>
           </div>
@@ -63,6 +71,10 @@ function AppPages({ session }: { session: Session | null }) {
       <Route path="/players" element={<Discovery session={session} />} />
       <Route path="/players/:id" element={<PlayerProfile session={session} />} />
       <Route path="/games" element={<MyGames session={session} />} />
+      <Route path="/browse" element={<BrowseGames session={session} />} />
+      <Route path="/squads" element={<Squads session={session} profile={profile} />} />
+      <Route path="/notifications" element={<Notifications session={session} />} />
+      <Route path="/settings" element={<Settings session={session} />} />
       <Route path="/games/new" element={<CreateGame />} />
       <Route path="/games/:id" element={<GameDetail session={session} />} />
       <Route path="/invitations" element={<Invitations session={session} />} />
@@ -75,7 +87,7 @@ export default function App() {
   const { state, retry } = useResource('session', () => pickup.getSession())
   const session = state.status === 'ready' ? state.data : null
   return (
-    <>
+    <CatalogProvider>
       <a className="skip-link" href="#main-content">Skip to content</a>
       <Header key={session?.userId ?? 'guest'} session={session} />
       {demo && <div className="demo-banner">Demo mode · Data stays in this browser</div>}
@@ -89,6 +101,6 @@ export default function App() {
           <Route path="*" element={<main className="wrap app-content"><AppPages key={session?.userId ?? 'guest'} session={session} /></main>} />
         </Routes>}
       </div>
-    </>
+    </CatalogProvider>
   )
 }

@@ -181,3 +181,28 @@ progress::-moz-progress-bar { background: #648a2f; }
   .brand { font-size: .93rem; gap: .42rem; }
   .brand-icon { width: 1.95rem; height: 1.95rem; }
 }
+
+
+/* Game discovery and community tools */
+.header-layout, .app-nav, .account-actions { flex-wrap: wrap; }
+.discovery-filters, .expanded-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); }
+.discovery-filters .filter-heading { grid-column: 1 / -1; }
+.filter-bar .filter-check { display: flex; gap: .45rem; align-self: center; align-items: center; }
+.browse-card { min-width: 0; display: grid; gap: .7rem; align-content: start; padding: 1rem; border: 1px solid var(--line); border-radius: .9rem; background: white; }
+.browse-card > .game-card { box-shadow: none; border: 0; padding: 0; }
+.notification-bell { position: relative; min-width: 2.75rem; min-height: 2.75rem; display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: .65rem; }
+.notification-bell span { position: absolute; top: -.35rem; right: -.35rem; min-width: 1.25rem; padding: .1rem .3rem; border-radius: 1rem; background: #395f1f; color: white; font-size: .75rem; text-align: center; }
+.notice-row { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; align-items: center; }
+.notice-row.unread { border-left: .25rem solid #60812c; }
+.notice-row h2, .chat-list li { display: flex; flex-wrap: wrap; gap: .55rem; align-items: baseline; }
+.chat-list { display: grid; gap: .55rem; max-height: 24rem; overflow-y: auto; }
+.chat-list li { border: 1px solid var(--line); border-radius: .65rem; padding: .65rem .85rem; overflow-wrap: anywhere; }
+.chat-list li p { flex-basis: 100%; white-space: pre-wrap; }
+.chat-list time { font-size: .85rem; }
+.join-code { letter-spacing: .12em; font-family: monospace; }
+.sport-record { border-top: 1px solid var(--line); padding-top: 1rem; }
+@media (max-width: 56rem) { .header-layout { align-items: flex-start; } .app-nav { order: 3; width: 100%; } }
+@media (max-width: 36rem) {
+  .discovery-filters, .expanded-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .team-select { min-width: 8rem; }
+}

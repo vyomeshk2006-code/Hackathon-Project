@@ -1,59 +1,63 @@
-import { Star } from 'lucide-react'
-import { sports, sportStatFields } from '../types/domain'
-import type { PlayerDetails, PlayerStats, RatingSummary, StatField } from '../types/domain'
 
-const labels = { gamesPlayed: 'Games played', wins: 'Wins', losses: 'Losses', draws: 'Draws', goals: 'Goals', assists: 'Assists', points: 'Points' }
-const recordFields = ['gamesPlayed', 'wins', 'losses', 'draws'] as const
-const allFields = ['goals', 'assists', 'points'] as const
-const reviewDate = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric',
-})
+import { Star } from 'lucide-react'
+import { useState } from 'react'
+import { skills, sportName, statLabel } from '../types/domain'
+import type { PlayerDetails, PlayerStats, RatingSummary } from '../types/domain'
+import { useCatalog } from './SportPicker'
 
 export function Rating({ profile }: { profile: RatingSummary }) {
   if (profile.avgRating === null) return <p className="muted">No reviews yet</p>
-  return (
-    <p className="icon-line">
-      <Star size={17} aria-hidden="true" />
-      <span>{profile.avgRating.toFixed(2)} / 5 · {profile.reviewCount} {profile.reviewCount === 1 ? 'review' : 'reviews'}</span>
-    </p>
-  )
+  return <p className="icon-line"><Star size={17} aria-hidden="true" />
+    <span>{profile.avgRating.toFixed(2)} / 5 sportsmanship · {profile.reviewCount} {profile.reviewCount === 1 ? 'review' : 'reviews'}</span>
+  </p>
 }
 
-function StatGrid({ stats, fields }: { stats: PlayerStats; fields: readonly StatField[] }) {
-  return (
-    <dl className="stat-grid">
-      {[...recordFields, ...fields].map(field => <div key={field}><dt>{labels[field]}</dt><dd>{stats[field]}</dd></div>)}
-    </dl>
-  )
+function StatGrid({ stats, fields }: { stats?: PlayerStats; fields: readonly string[] }) {
+  const games = stats?.gamesPlayed ?? 0
+  const wins = stats?.wins ?? 0
+  const items: [string, string | number][] = [
+    ['Matches played', games], ['Wins', wins], ['Losses', stats?.losses ?? 0], ['Draws', stats?.draws ?? 0],
+    ['Win percentage', (games ? Math.round(wins / games * 100) : 0) + '%'],
+    ...fields.map((field): [string, number] => [statLabel(field), stats?.metrics[field] ?? 0]),
+  ]
+  return <dl className="stat-grid">{items.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
 }
 
 export function PlayerRecord({ profile }: { profile: PlayerDetails }) {
-  return (
-    <>
-      <section className="card form-stack">
-        <h2>Player statistics</h2>
-        <p className="muted">Totals include confirmed final results only.</p>
-        <StatGrid stats={profile.stats} fields={allFields} />
-        {profile.sportStats.map(stats => (
-          <div className="section-stack" key={stats.sport}>
-            <h3>{sports[stats.sport]}</h3>
-            <StatGrid stats={stats} fields={sportStatFields[stats.sport]} />
-          </div>
-        ))}
-      </section>
-      <section className="card form-stack">
-        <h2>Ratings and reviews</h2>
-        <Rating profile={profile} />
-        {profile.reviews.length > 0 && <ul className="review-list">
-          {profile.reviews.map(review => <li key={review.id}>
-            <div className="flex flex-wrap items-center gap-x-3">
-              <strong>{review.reviewerName}</strong><span className="pill">{review.rating} / 5</span>
-              <time className="muted" dateTime={review.createdAt}>{reviewDate.format(new Date(review.createdAt))}</time>
-            </div>
-            {review.comment && <p>{review.comment}</p>}
-          </li>)}
-        </ul>}
-      </section>
-    </>
-  )
+  const catalog = useCatalog()
+  const [sport, setSport] = useState('')
+  const options = [...new Set([...profile.sports.map(item => item.sport), ...profile.sportStats.map(item => item.sport)])]
+  const selected = options.includes(sport) ? sport : options[0]
+  const totals = profile.sportStats.find(item => item.sport === selected)
+  const preference = profile.sports.find(item => item.sport === selected)
+  const fields = catalog.find(item => item.slug === selected)?.fields ?? []
+  const reviews = profile.reviews.filter(item => item.sport === selected)
+  return <>
+    <section className="card form-stack">
+      <h2>Player statistics</h2>
+      <p className="muted">Only finalized matches count.</p>
+      <h3>All sports</h3><StatGrid stats={profile.stats} fields={[]} />
+      {selected && <div className="form-stack sport-record">
+        <label>Sport dashboard<select value={selected} onChange={event => setSport(event.target.value)}>
+          {options.map(value => <option value={value} key={value}>{sportName(value, catalog)}</option>)}
+        </select></label>
+        <h3>{sportName(selected, catalog)}</h3>
+        {preference && <p>{skills[preference.skill]} · {preference.levelSource === 'verified'
+          ? 'Verified by ' + preference.ratingCount + ' players' : 'Self-rated'}</p>}
+        {(!totals || !totals.gamesPlayed) && <p className="muted">No finalized matches in this sport yet.</p>}
+        <StatGrid stats={totals} fields={fields} />
+      </div>}
+    </section>
+    <section className="card form-stack">
+      <h2>Sportsmanship and anonymous reviews</h2>
+      <Rating profile={profile} />
+      {reviews.length > 0 ? <ul className="review-list">{reviews.map(review => <li key={review.id}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="pill">Sportsmanship {review.rating} / 5</span>
+          {review.skillRating !== null && <span className="pill">Skill {review.skillRating} / 5</span>}
+        </div>
+        {review.comment && <p>{review.comment}</p>}
+      </li>)}</ul> : selected && <p className="muted">No reviews for {sportName(selected, catalog)} yet.</p>}
+    </section>
+  </>
 }

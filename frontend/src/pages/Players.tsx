@@ -3,29 +3,43 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { PlayerRecord, Rating } from '../components/PlayerRecord'
+import { InviteReport, TeamPicker } from '../components/GameManagement'
+import { SportPicker, useCatalog } from '../components/SportPicker'
+import { ActionNotice } from '../components/ActionNotice'
+import { useAction } from '../hooks/useAction'
 import { Avatar, LoadError, Notice, PageTitle, SportBadge } from '../components/ui'
 import { errorMessage, useResource } from '../hooks/useResource'
 import { pickup } from '../services'
-import { isUpcoming, neighborhoods, skills, sports } from '../types/domain'
-import type { Neighborhood, PlayerFilters, Preference, Profile, Session, Skill, Sport } from '../types/domain'
+import { defaultPreferences, isUpcoming, neighborhoods, skills, sportName, statLabel } from '../types/domain'
+import type { BulkInviteResult, Neighborhood, PlayerFilters, Preference, Profile, Session, Skill, Team } from '../types/domain'
 
-const sportOptions = Object.entries(sports) as [Sport, string][]
 const neighborhoodOptions = Object.entries(neighborhoods) as [Neighborhood, string][]
 
 export function Discovery({ session }: { session: Session }) {
+  const catalog = useCatalog()
   const [params, setParams] = useSearchParams()
-  const selectedSport = params.get('sport') as Sport | null
+  const [selected, setSelected] = useState<string[]>([])
+  const [team, setTeam] = useState<Team | null>(null)
+  const [report, setReport] = useState<{ results: BulkInviteResult[]; names: Record<string, string> } | null>(null)
+  const action = useAction()
+  const selectedSport = params.get('sport')
   const selectedNeighborhood = params.get('neighborhood') as Neighborhood | null
   const selectedSkill = params.get('skill') as Skill | null
-  const sport = selectedSport && Object.hasOwn(sports, selectedSport) ? selectedSport : undefined
+  const sport = selectedSport && catalog.some(item => item.slug === selectedSport) ? selectedSport : undefined
   const neighborhood = selectedNeighborhood && Object.hasOwn(neighborhoods, selectedNeighborhood) ? selectedNeighborhood : undefined
   const skill = selectedSkill && Object.hasOwn(skills, selectedSkill) ? selectedSkill : undefined
   const gameId = params.get('game') || undefined
+  const name = params.get('name') ?? ''
+  const replacement = params.get('replacement') === '1'
   const travel = params.get('match') === 'travel'
   const filters: PlayerFilters | null = travel
-    ? sport && neighborhood ? { match: 'travel', sport, neighborhood, skill, gameId } : null
-    : { match: 'exact', sport, neighborhood, skill, gameId }
+    ? sport && neighborhood ? { match: 'travel', sport, neighborhood, skill, gameId, name, replacement } : null
+    : { match: 'exact', sport, neighborhood, skill, gameId, name, replacement }
   const { state, retry } = useResource(`${session.userId}:${params}`, () => filters ? pickup.findPlayers(filters) : Promise.resolve([]))
+
+  const visible = state.status === 'ready' ? state.data : []
+  const selectedVisible = visible.filter(player => selected.includes(player.id))
+  const statFields = catalog.find(item => item.slug === sport)?.fields ?? []
 
   function updateFilter(field: string, value: string) {
     const next = new URLSearchParams(params)
@@ -36,16 +50,17 @@ export function Discovery({ session }: { session: Session }) {
 
   return (
     <>
-      <PageTitle title="Find players" subtitle="Search a neighborhood or find players whose travel radius reaches your game." />
+      <PageTitle title={replacement ? "Find replacement players" : "Find players"} subtitle="Search a neighborhood or find players whose travel radius reaches your game." />
       <div className="card filter-bar discovery-filters">
         <span className="filter-heading"><SlidersHorizontal size={19} aria-hidden="true" /> Filters</span>
+        <label>Player name<input value={name} onChange={event => updateFilter('name', event.target.value)} placeholder="Search by name" /></label>
         <label>Match by<select value={travel ? 'travel' : 'exact'} onChange={event => updateFilter('match', event.target.value)}>
           <option value="exact">Home neighborhood</option>
           <option value="travel">Player travel radius</option>
         </select></label>
         <label>Sport<select value={sport ?? ''} onChange={event => updateFilter('sport', event.target.value)}>
           <option value="">{travel ? 'Choose a sport' : 'All sports'}</option>
-          {sportOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {catalog.map(item => <option key={item.slug} value={item.slug}>{item.name}</option>)}
         </select></label>
         <label>{travel ? 'Game neighborhood' : 'Home neighborhood'}<select value={neighborhood ?? ''} onChange={event => updateFilter('neighborhood', event.target.value)}>
           <option value="">{travel ? 'Choose the game area' : 'All Tampa areas'}</option>
@@ -56,6 +71,19 @@ export function Discovery({ session }: { session: Session }) {
           {Object.entries(skills).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select></label>
       </div>
+      {gameId && <section className="card form-stack">
+        <div className="flex flex-wrap gap-3 items-end">
+          <TeamPicker team={team} onChange={setTeam} />
+          <button className="button primary" disabled={action.pending || selectedVisible.length === 0} onClick={() => void action.run(async () => {
+            const results = await pickup.inviteMany(gameId, selectedVisible.map(player => player.id), team)
+            setReport({ results, names: Object.fromEntries(selectedVisible.map(player => [player.id, player.displayName])) })
+            setSelected([])
+          }, '')}>Invite selected ({selectedVisible.length})</button>
+          <Link className="text-link" to={'/games/' + gameId}>Back to game</Link>
+        </div>
+        <ActionNotice {...action} />
+        {report && <InviteReport {...report} />}
+      </section>}
       {!filters && <Notice>Choose a sport and a game neighborhood to search by travel radius.</Notice>}
       {filters && state.status === 'loading' && <Notice>Finding players…</Notice>}
       {filters && state.status === 'error' && <LoadError error={state.error} retry={retry} />}
@@ -73,9 +101,18 @@ export function Discovery({ session }: { session: Session }) {
                 <p className="muted">{profile.distanceMiles !== undefined && `${profile.distanceMiles.toFixed(1)} mi from game area · `}
                   Travels up to {profile.travelRadiusMiles} mi</p>
                 <Rating profile={profile} />
+                <p className="muted">{profile.stats.gamesPlayed} played · {profile.stats.wins} wins · {profile.stats.losses} losses</p>
+                {sport && statFields.length > 0 && <p className="muted">{statFields.map(field =>
+                  statLabel(field) + ' ' + (profile.sportStats.find(stats => stats.sport === sport)?.metrics[field] ?? 0)).join(' · ')}</p>}
                 <ul className="skill-list">
                   {profile.sports.map(({ sport, skill }) => <li key={sport}><SportBadge sport={sport} /><span>{skills[skill]}</span></li>)}
                 </ul>
+                {gameId && <label className="check-label flex gap-2 items-center"><input type="checkbox"
+                  checked={selected.includes(profile.id)} disabled={action.pending || (selected.length >= 25 && !selected.includes(profile.id))}
+                  onChange={event => {
+                    const checked = event.target.checked
+                    setSelected(current => checked ? [...current, profile.id] : current.filter(id => id !== profile.id))
+                  }} /> Select {profile.displayName} to invite</label>}
                 <Link className="button secondary" to={`/players/${profile.id}?${params}`}>View profile<span className="sr-only"> for {profile.displayName}</span></Link>
               </article>
             ))}
@@ -88,15 +125,11 @@ export function Discovery({ session }: { session: Session }) {
 
 export function ProfileEditor({ profile }: { profile: Profile | null }) {
   const navigate = useNavigate()
+  const catalog = useCatalog()
+  const [selectedSport, setSport] = useState('')
   const [preferences, setPreferences] = useState<Preference[]>(profile?.sports ?? [])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  function toggleSport(sport: Sport, checked: boolean) {
-    setPreferences(current => checked
-      ? [...current, { sport, skill: 'beginner' }]
-      : current.filter(preference => preference.sport !== sport))
-  }
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
@@ -106,6 +139,7 @@ export function ProfileEditor({ profile }: { profile: Profile | null }) {
       const saved = await pickup.saveProfile({
         displayName: String(form.get('name')), neighborhood: String(form.get('neighborhood')) as Neighborhood,
         travelRadiusMiles: Number(form.get('radius')), bio: String(form.get('bio')), sports: preferences,
+        notificationPreferences: { replacementAlerts: form.has('replacementAlerts'), newGameAlerts: form.has('newGameAlerts') },
       })
       navigate(profile ? `/players/${saved.id}` : '/home', { replace: true })
     } catch (error) {
@@ -130,27 +164,37 @@ export function ProfileEditor({ profile }: { profile: Profile | null }) {
         <label>Bio (optional)<textarea name="bio" rows={3} defaultValue={profile?.bio} maxLength={300} placeholder="When and where do you like to play?" /></label>
         <fieldset>
           <legend>Sports and skill levels</legend>
-          <div className="preference-grid">
-            {sportOptions.map(([sport, name]) => {
-              const selected = preferences.find(preference => preference.sport === sport)
-              return (
-                <div className="preference-option" key={sport}>
-                  <label className="check-label">
-                    <input type="checkbox" checked={!!selected} onChange={event => toggleSport(sport, event.target.checked)} />
-                    {name}
-                  </label>
-                  {selected && <label>{name} skill level<select value={selected.skill} onChange={event => {
-                    const skill = event.target.value as Skill
-                    setPreferences(current => current.map(preference => preference.sport === sport ? { sport, skill } : preference))
-                  }}>{Object.entries(skills).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}
-                </div>
-              )
-            })}
+          <div className="form-stack">
+            <SportPicker key={preferences.length} value={selectedSport} onChange={setSport} create />
+            <button className="button secondary self-start" type="button" disabled={!selectedSport || preferences.some(item => item.sport === selectedSport)}
+              onClick={() => {
+                const existing = profile?.sports.find(item => item.sport === selectedSport)
+                setPreferences(current => [...current, existing ?? { sport: selectedSport, skill: 'beginner' }])
+                setSport('')
+              }}>Add sport to profile</button>
+            <div className="preference-grid">{preferences.map(preference => {
+              const label = sportName(preference.sport, catalog)
+              const verified = preference.levelSource === 'verified'
+              return <div className="preference-option" key={preference.sport}>
+                <label>{label} skill level<select value={preference.skill} disabled={verified} onChange={event => {
+                  const skill = event.target.value as Skill
+                  setPreferences(current => current.map(item => item.sport === preference.sport ? { ...item, skill } : item))
+                }}>{Object.entries(skills).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+                <p className="muted">{verified ? 'Verified by ' + preference.ratingCount + ' players' : 'Self-rated'}</p>
+                <button type="button" className="text-link self-start" onClick={() =>
+                  setPreferences(current => current.filter(item => item.sport !== preference.sport))}>Remove {label}</button>
+              </div>
+            })}</div>
           </div>
+        </fieldset>
+        <fieldset className="form-stack">
+          <legend>Notification preferences</legend>
+          <label className="check-label"><input type="checkbox" name="replacementAlerts" defaultChecked={profile?.notificationPreferences?.replacementAlerts ?? defaultPreferences.replacementAlerts} /> Emergency replacement alerts</label>
+          <label className="check-label"><input type="checkbox" name="newGameAlerts" defaultChecked={profile?.notificationPreferences?.newGameAlerts ?? defaultPreferences.newGameAlerts} /> New games near me</label>
         </fieldset>
         {error && <Notice tone="error">{error}</Notice>}
         <div className="flex flex-wrap gap-3">
-          <button className="button primary" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}</button>
+          <button className="button primary" disabled={busy || !preferences.length}>{busy ? 'Saving…' : 'Save profile'}</button>
           {profile && <Link className="button secondary" to={`/players/${profile.id}`}>Cancel</Link>}
         </div>
       </form>
@@ -165,6 +209,7 @@ function InvitePlayer({ player, session }: { player: Profile; session: Session }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [sentTo, setSentTo] = useState('')
+  const [team, setTeam] = useState<Team | null>(null)
   const games = state.status === 'ready' ? state.data.filter(game => game.organizerId === session.userId && isUpcoming(game) &&
     game.confirmed < game.maxPlayers && player.sports.some(preference => preference.sport === game.sport)) : []
   const gameId = selected || games.find(game => game.id === params.get('game'))?.id || (games.length === 1 ? games[0].id : '')
@@ -186,7 +231,7 @@ function InvitePlayer({ player, session }: { player: Profile; session: Session }
     setError('')
     setSentTo('')
     try {
-      await pickup.invite(availableGame.id, player.id)
+      await pickup.invite(availableGame.id, player.id, team)
       setSentTo(availableGame.title)
     } catch (error) {
       setError(errorMessage(error))
@@ -210,6 +255,7 @@ function InvitePlayer({ player, session }: { player: Profile; session: Session }
         {availableGame && detail.state.status === 'loading' && <Notice>Checking invitation status…</Notice>}
         {detail.state.status === 'error' && <LoadError error={detail.state.error} retry={detail.retry} />}
         {blocked && <p className="muted">{blocked}</p>}
+        <TeamPicker team={team} onChange={setTeam} />
         <button className="button primary self-start" disabled={busy || !game || !!blocked}>{busy ? 'Sending…' : 'Send invitation'}</button>
       </form> : <>
         <p className="muted">You don’t have an upcoming game with an open spot for any of this player’s sports.</p>
@@ -242,7 +288,7 @@ export function PlayerProfile({ session }: { session: Session }) {
           {profile.bio && <p>{profile.bio}</p>}
           <h2>Sports</h2>
           <ul className="skill-list">
-            {profile.sports.map(({ sport, skill }) => <li key={sport}><SportBadge sport={sport} /><span>{skills[skill]}</span></li>)}
+            {profile.sports.map(({ sport, skill, levelSource, ratingCount }) => <li key={sport}><SportBadge sport={sport} /><span>{skills[skill]} · {levelSource === 'verified' ? 'Verified by ' + ratingCount + ' players' : 'Self-rated'}</span></li>)}
           </ul>
         </section>
         {!own && <InvitePlayer key={id} player={profile} session={session} />}

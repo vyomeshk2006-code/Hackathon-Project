@@ -196,7 +196,7 @@ test('teams, disputed and revised results, final-only stats, and one review per 
   const reviewed = await service.getPlayerDetails(jordan.id)
   assert.equal(reviewed.avgRating, 5)
   assert.equal(reviewed.reviewCount, 1)
-  assert.equal(reviewed.reviews[0].reviewerName, 'Maya Chen')
+  assert.deepEqual(Object.keys(reviewed.reviews[0]).sort(), ['comment', 'id', 'rating', 'skillRating', 'sport'])
 
   signInAsDemoAccount(jordan.id)
   await service.submitResults(gameId, { ...correction, teamAScore: 1, performances: [] })

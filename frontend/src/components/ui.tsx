@@ -1,19 +1,22 @@
 import { CalendarDays, CircleDot, Dribbble, Goal, MapPin, Volleyball } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
+import { useCatalog } from './SportPicker'
 import { Link } from 'react-router-dom'
 import { formatGameTime } from '../lib/time'
-import { neighborhoods, sports } from '../types/domain'
+import { neighborhoods, skills, sportName } from '../types/domain'
 import type { GameSummary, Sport } from '../types/domain'
 
-const sportIcons = { soccer: Goal, basketball: Dribbble, volleyball: Volleyball, pickleball: CircleDot }
+const sportIcons: Partial<Record<string, LucideIcon>> = { soccer: Goal, basketball: Dribbble, volleyball: Volleyball, pickleball: CircleDot }
 
 export function SportIcon({ sport }: { sport: Sport }) {
-  const Icon = sportIcons[sport]
+  const Icon = sportIcons[sport] ?? CircleDot
   return <Icon size={21} aria-hidden="true" />
 }
 
 export function SportBadge({ sport }: { sport: Sport }) {
-  return <span className="sport-badge"><SportIcon sport={sport} />{sports[sport]}</span>
+  const catalog = useCatalog()
+  return <span className="sport-badge"><SportIcon sport={sport} />{sportName(sport, catalog)}</span>
 }
 
 export function PageTitle({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
@@ -49,6 +52,8 @@ export function GameCard({ game }: { game: GameSummary }) {
           {game.status !== 'scheduled' && <span className="pill capitalize">{game.status}</span>}
         </div>
       </div>
+      <p className="muted">{game.joinMode === 'open' ? 'Open' : 'Invite-only'} · {game.skillLevel ? skills[game.skillLevel] : 'All levels'}
+        {game.teamSize && ' · ' + game.teamSize + 'v' + game.teamSize}</p>
       <h3><Link className="card-link" to={`/games/${game.id}`}>{game.title}</Link></h3>
       <p className="icon-line"><CalendarDays size={17} aria-hidden="true" />{formatGameTime(game.startsAt)}</p>
       <p className="icon-line"><MapPin size={17} aria-hidden="true" />{game.venue} · {neighborhoods[game.neighborhood]}</p>

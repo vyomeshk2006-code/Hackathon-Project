@@ -6,7 +6,7 @@ export const errorMessage = (error: unknown) =>
 
 type State<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; error: string }
 
-export function useResource<T>(key: string, load: () => Promise<T>) {
+export function useResource<T>(key: string, load: () => Promise<T>, subscribe = pickup.subscribe) {
   const [result, setResult] = useState<{ key: string; state: State<T> }>()
   const [retryCount, setRetryCount] = useState(0)
   const loadCurrent = useEffectEvent(load)
@@ -24,13 +24,13 @@ export function useResource<T>(key: string, load: () => Promise<T>) {
         },
       )
     }
-    const unsubscribe = pickup.subscribe(refresh)
+    const unsubscribe = subscribe(refresh)
     refresh()
     return () => {
       version += 1
       unsubscribe()
     }
-  }, [key, retryCount])
+  }, [key, retryCount, subscribe])
 
   return {
     state: result?.key === key ? result.state : { status: 'loading' } as const,

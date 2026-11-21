@@ -2,6 +2,8 @@ export const errorMessages = {
   FORBIDDEN: 'You don’t have permission to do that.',
   PROFILE_REQUIRED: 'Create a player profile first.',
   VALIDATION: 'Check the information you entered.',
+  TEAM_FULL: 'That team is full.',
+  LEVEL_LOCKED: 'Verified levels are updated by peer ratings.',
   GAME_FULL: 'This game is full.',
   GAME_UNAVAILABLE: 'This game is no longer available for that action.',
   INVITATION_CLOSED: 'This invitation is closed.',

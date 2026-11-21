@@ -13,29 +13,24 @@ npm run dev
 
 Open the local URL Vite prints. Run `npm test` to check the mock service and `npm run build` to type-check and build the production bundle. For Vercel deployment, set the root directory to `frontend`.
 
-### Two-player demo
 
-1. Open **Try the demo** and choose **Jordan · Organizer**.
-2. Create a soccer game in Downtown with capacity of two. Schedule it for later **today, Tampa time** so results are available during the demo.
-3. Select **Find players to invite** to search by player travel radius. Open Maya Chen's profile and send the invitation.
-4. Log out, choose **Maya · Player**, and accept under **Invitations**. You can also open a second tab at the same URL and sign in as Maya there.
-5. As Jordan, open the game under **My games**. The roster shows both players and zero spots open. Select **Auto-assign teams** or assign one player to each team manually. Enter the score and player performance, then submit the result.
-6. As Maya, open the completed game and confirm the result. To demonstrate a dispute, select **Dispute results**, enter a reason, then have Jordan revise the score and Maya confirm the new revision.
-7. Each player can review the other from the game after the result is final. Open either profile to see its record, sport totals, and reviews.
+### Browser demo
 
-To try cancellations, create a separate upcoming game with an open spot. Send an invitation, cancel it under **Game management**, and send a new one. Cancelling the game clears its remaining pending invitations.
+Mock accounts share data across tabs on the same local URL. Each tab has its own signed-in account. Use **Try the demo** to choose Jordan, Maya, Andre, Sofia, or Cam. Sign up with a test email and a throwaway password to exercise onboarding and add a custom sport. Clear site storage to reset the mock.
 
-To demo onboarding, sign up with a test email such as `player@example.test` and a throwaway password. Select a sport and Tampa neighborhood, then save the profile. Demo data persists for the browser origin, and sign-in is per tab. Clear the site's browser storage to reset the demo.
+- **Open game and emergency replacement:** As Jordan, create a Soccer game starting in 45 minutes Tampa time with one player per team. As Maya, browse and join. Assign Maya to Team B and send a chat message from Jordan. Switch back to Maya, read the message, and withdraw. Jordan gets a withdrawal notice, and eligible accounts such as Andre and Cam get replacement alerts. Open their notifications in separate tabs and claim the spot. The first valid claim fills the roster, and Maya loses chat access.
+- **Requests and invitations:** Create an invite-only Intermediate Soccer game. Maya can request a spot and Jordan can approve, decline, or assign a team. An all-level invite-only game stays private until the organizer invites someone. Use **Find players to invite** for single or bulk invitations, or **Find replacement** for nearby eligible players.
+- **Squads:** Create a Soccer squad, share its join code with a demo player, have that player join, then invite the squad to a game from **Game management**. Squad members still accept separately.
+- **Results and player records:** Create a game for later today in Tampa, fill the roster, assign both teams, and submit scores and player performances. A different player disputes or confirms. Revise disputed results as Jordan and confirm the new revision. Final games appear in player statistics, and anonymous two-rating reviews open for roster players.
+- **Verified skill:** Have three distinct roster players rate a player across two finalized games. Use skill scores of 5 for an intermediate player to demonstrate a verified promotion. The player receives a level-change notification and the sport's manual level picker locks.
 
 ### Supabase integration
 
-The browser mock covers both v2 demo milestones. It uses local storage, per-tab sessions, and approximate neighborhood centers. It reproduces permission checks and result states for the demo. Supabase still needs to provide the live data, authorization, and database transactions.
+The running app uses browser-local mock data, per-tab sessions, and approximate neighborhood centers. On browsers with the Web Locks API, it serializes writes across tabs to the same origin. The mock is intended for demonstrations and local testing.
 
-Implement the async interface in `frontend/src/services/contract.ts` using Supabase and select it in `frontend/src/services/index.ts`. Omit the optional `demo` configuration to hide the seeded account shortcuts and demo messaging.
+The typed service boundary is `frontend/src/services/contract.ts`. `frontend/src/services/supabaseV2.ts` prepares Auth and confirmed v2 profile, search, game, invitation, team, and result calls using the official client. The app does not select this adapter. It requires a complete compatible implementation before switching modes.
 
-- Connect sign-up, sign-in, sign-out, and session changes to Supabase Auth. Keep email confirmation off for the hackathon project and create profiles through `save_profile`.
-- Use `search_players` for travel-radius matching and the exact-neighborhood profile query for exact matches. Map SQL rows and RPC outputs to the frontend types, including nullable ratings and team fields.
-- Read games, roster, invitations, results, and performance rows under RLS. Use the v2 RPCs for all writes, including cancellation, team changes, result submission and confirmation, and reviews. Translate stable error codes using `frontend/src/services/errors.ts`.
-- Read totals and ratings from `player_stats`, `player_sport_stats`, and `player_ratings`. Refresh relevant reads after writes and on session changes. Re-run both acceptance milestones with two real accounts.
-
-The [v2 database contract](docs/database-contract.md) defines the exact tables, views, RPC parameters, and authorization rules.
+1. Keep the [agreed v2 contract](docs/database-contract.md) as the baseline. Confirm the [v3 proposal](docs/database-contract-v3-proposal.md) with the backend owner before binding game browsing and requests, chat, squads, withdrawals, replacements, preferences, notifications, and anonymous skill reviews.
+2. Agree on the [v4 addendum proposal](docs/database-contract-v4-addendum-proposal.md) for custom sports, stat definitions, metric payloads, and game descriptions.
+3. Map approved reads, RPC responses, RLS, and stable error codes to the frontend service. Realtime subscriptions should use owner-scoped notifications and roster-scoped game messages. The public review route must read `public_reviews`.
+4. Configure the project URL and a Supabase publishable key, then retest Auth and the full flows with multiple real accounts. Production notification creation, privacy, and claim safety depend on the backend.
