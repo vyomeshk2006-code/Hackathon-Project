@@ -13,14 +13,15 @@ Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md), th
 | `migrations/007_v3_functions.sql` | v3 functions: `browse_games`, `join_game`, join requests, `withdraw_from_game`, `claim_replacement_spot`, bulk and squad invites, squads, chat, notifications, level calculation, and the updated v2 functions |
 | `migrations/008_v4.sql` | v4: every upcoming game discoverable, 13-sport catalog + `create_sport`, per-sport metrics (`sport_stat_definitions`, `player_game_stat_values`, `player_sport_metric_totals`), win %, game descriptions |
 | `migrations/009_v5.sql` | v5: usernames, private phone numbers + `get_game_contacts`, username search, chat removed, venue address, game end time + automatic expiration from Browse, `my_game_history`, winner-only results + `results_needed` reminders |
+| `migrations/010_app_support.sql` | Functions the frontend's live adapter uses: `username_available`, `set_notification_preferences`, `edit_game`, `find_players`, `game_participation` |
 | `seed.sql` | Optional **demo data**: 12 players (usernames + fictional 555 phones), 15 games, past results, reviews, one squad |
-| `tests/` | Local tests: 109 v2 + 117 v3 + 73 v4 + 88 v5 checks. Needs no Supabase account. |
+| `tests/` | Local tests: 109 v2 + 117 v3 + 73 v4 + 88 v5 + 30 app-support checks. Needs no Supabase account. |
 
 ## Setup (new project)
 
 1. **Create the project:** supabase.com → New project → region **East US**. Save the database password privately.
 2. **Run the SQL:** Dashboard → **SQL Editor** → New query. Paste and **Run** each file in this order:
-   `001` → … → `009` (all nine, in order) → `seed.sql` (optional, and only **after** all nine).
+   `001` → … → `010` (all ten, in order) → `seed.sql` (optional, and only **after** all ten).
 3. **Auth:** Authentication → Sign In / Providers → Email: enabled, and **Confirm email: off** (per the contract, for the hackathon).
 4. **Realtime:** Database → Publications → `supabase_realtime` should list `notifications`. (Chat was removed in v5.)
 5. **Keys for the frontend:** Project Settings → API keys. Share these privately with the frontend (not in Git):
@@ -31,7 +32,7 @@ Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md), th
    Never share the `service_role` / secret key.
 6. **Check:** Table Editor → `profiles` has 12 rows and `games` has 15 (if you ran the seed).
 
-**Already running an older version?** Run only the migrations you haven't run yet, in order (from v3: `008` then `009`). Existing data is kept, and old results are copied into the new metrics table. Don't re-run the seed.
+**Already running an older version?** Run only the migrations you haven't run yet, in order (from v3: `008`, `009`, then `010`). Existing data is kept, and old results are copied into the new metrics table. Don't re-run the seed.
 
 ## Demo data
 
