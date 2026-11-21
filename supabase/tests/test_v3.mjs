@@ -65,7 +65,8 @@ async function player(handle, name, hood, radius, sports, extra = {}) {
   const id = crypto.randomUUID();
   await q(`insert into auth.users (id, email) values ($1, $2)`, [id, `${handle}@test.local`]);
   await rpc(id, 'save_profile', { p_display_name: name, p_neighborhood: hood, p_travel_radius_miles: radius, p_bio: '',
-    p_sports: sports.map(([s, l]) => ({ sport_slug: s, skill_level: l })), ...extra });
+    p_sports: sports.map(([s, l]) => ({ sport_slug: s, skill_level: l })),
+    p_username: 'u_' + handle, p_phone: '8135550123', ...extra });   // v5: username + phone required
   return id;
 }
 // Creates a game, then backdates created_at so the 2-per-day limit doesn't block the rest of the suite.
@@ -142,15 +143,16 @@ try {
   check('open game visible to a beginner', (await as(ben, `select * from games where id = $1`, [game1])).rowCount === 1);
   check('open game roster visible to anyone', (await as(ben, `select * from game_players where game_id = $1`, [game1])).rowCount === 1);
   check('invite-only intermediate game visible to intermediate', (await as(nina, `select * from games where id = $1`, [game2])).rowCount === 1);
-  check('invite-only intermediate game hidden from beginner', (await as(ben, `select * from games where id = $1`, [game2])).rowCount === 0);
-  const browseN = await rpc(nina, 'browse_games', { p_sport_slug: 'soccer' });
+  // v4: upcoming invite-only games are discoverable by everyone; only eligible players can request
+  check('(v4) invite-only game visible to a beginner', (await as(ben, `select * from games where id = $1`, [game2])).rowCount === 1);
+  const browseN = await rpc(nina, 'browse_games', { p_sport_query: 'soccer' });
   const b1 = browseN.find((g) => g.id === game1), b2 = browseN.find((g) => g.id === game2);
   check('browse: open game can_join for intermediate', b1?.can_join === true && b1?.can_request === false, b1);
   check('browse: invite-only can_request for intermediate', b2?.can_request === true && b2?.can_join === false, b2);
-  check('browse: spots_left and distance', b1?.spots_left === 9 && Number(b1?.distance_miles) === 0, b1);
-  const browseB = await rpc(ben, 'browse_games', { p_sport_slug: 'soccer' });
-  check('browse: beginner sees open game but cannot join, no invite-only game',
-    browseB.find((g) => g.id === game1)?.can_join === false && !browseB.some((g) => g.id === game2));
+  check('browse: spots_left (v5: no distance)', b1?.spots_left === 9 && !('distance_miles' in b1), b1);
+  const browseB = await rpc(ben, 'browse_games', { p_sport_query: 'soccer' });
+  check('(v4) browse: beginner sees both games but can neither join nor request',
+    browseB.find((g) => g.id === game1)?.can_join === false && browseB.find((g) => g.id === game2)?.can_request === false);
 
   console.log('\n== join_game');
   check('join open game', (await rpc(nina, 'join_game', { p_game_id: game1 })) === 'joined');
@@ -163,7 +165,7 @@ try {
   const req = await rpc(nina, 'request_to_join', { p_game_id: game2 });
   check('request again returns same id', (await rpc(nina, 'request_to_join', { p_game_id: game2 })) === req);
   check('organizer notified (join_request_received)', (await notifs(olivia, 'join_request_received', game2)) === 1);
-  await expectError('beginner requests', () => rpc(ben, 'request_to_join', { p_game_id: game2 }), 'FORBIDDEN');
+  await expectError('(v4) beginner requests', () => rpc(ben, 'request_to_join', { p_game_id: game2 }), 'NOT_ELIGIBLE');
   await expectError('non-organizer approves', () => rpc(nina, 'respond_to_join_request', { p_request_id: req, p_response: 'approved' }), 'FORBIDDEN');
   check('approve onto Team B', (await rpc(olivia, 'respond_to_join_request', { p_request_id: req, p_response: 'approved', p_team: 'B' })) === 'approved');
   check('approved player is on Team B', (await one(`select team from game_players where game_id = $1 and player_id = $2`, [game2, nina])).team === 'B');
@@ -269,22 +271,7 @@ try {
   await setStart(gameN, '-1 minute');
   await expectError('withdraw after kickoff', () => rpc(qq, 'withdraw_from_game', { p_game_id: gameN }), 'GAME_UNAVAILABLE');
 
-  console.log('\n== Game chat');
-  const msg = await rpc(nina, 'send_game_message', { p_game_id: gameR, p_body: '  On my way!  ' });
-  check('roster member sends a message', /^[0-9a-f-]{36}$/.test(msg));
-  check('message trimmed', (await one(`select body from game_messages where id = $1`, [msg])).body === 'On my way!');
-  check('roster member reads chat', (await as(w2, `select * from game_messages where game_id = $1`, [gameR])).rowCount === 1);
-  check('withdrawn player cannot read chat', (await as(w1, `select * from game_messages where game_id = $1`, [gameR])).rowCount === 0);
-  await expectError('withdrawn player cannot send', () => rpc(w1, 'send_game_message', { p_game_id: gameR, p_body: 'hi' }), 'FORBIDDEN');
-  check('outsider cannot read chat', (await as(ben, `select * from game_messages where game_id = $1`, [gameR])).rowCount === 0);
-  await expectError('outsider cannot send', () => rpc(ben, 'send_game_message', { p_game_id: gameR, p_body: 'hi' }), 'FORBIDDEN');
-  await expectError('empty message', () => rpc(w2, 'send_game_message', { p_game_id: gameR, p_body: '   ' }), 'VALIDATION');
-  await expectError('no direct message inserts', () => as(nina, `insert into game_messages (game_id, sender_id, body) values ($1, $2, 'x')`, [gameR, nina]), 'permission denied');
-  const dot = async (uid) => (await as(uid, `select has_new from my_game_chat_status where game_id = $1`, [gameR])).rows[0]?.has_new;
-  check('"new" dot on for other players', (await dot(w2)) === true);
-  check('"new" dot off for the sender', (await dot(nina)) === false);
-  await rpc(w2, 'mark_chat_read', { p_game_id: gameR });
-  check('"new" dot off after mark_chat_read', (await dot(w2)) === false);
+  // v5 removed game chat (see test_v5.mjs)
 
   console.log('\n== Notifications');
   const unread = (await one(`select count(*)::int c from notifications where user_id = $1 and read_at is null`, [nina])).c;

@@ -1,6 +1,6 @@
 # Pickup Sports Tampa — Supabase backend
 
-Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md) plus the approved [`docs/database-contract-v3-proposal.md`](../docs/database-contract-v3-proposal.md). The contracts are the source of truth for every table, column, function, and error code. This README only covers setup.
+Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md), the approved [`docs/database-contract-v3-proposal.md`](../docs/database-contract-v3-proposal.md), [`docs/database-contract-v4.md`](../docs/database-contract-v4.md), and [`docs/database-contract-v5-proposal.md`](../docs/database-contract-v5-proposal.md) (v5, approved). The contracts are the source of truth for every table, column, function, and error code. This README only covers setup.
 
 | File | What it does |
 |---|---|
@@ -11,16 +11,18 @@ Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md) plu
 | `migrations/005_v3_schema.sql` | v3 tables and columns: game types, skill levels, team size, squads, join requests, withdrawals, replacement alerts, notifications, chat, hidden level scores, plus the views `public_reviews`, `my_game_chat_status`, `my_squads`, `my_game_quota` |
 | `migrations/006_v3_security.sql` | v3 grants and RLS: who can see open/invite-only games, roster-only chat, anonymous reviews |
 | `migrations/007_v3_functions.sql` | v3 functions: `browse_games`, `join_game`, join requests, `withdraw_from_game`, `claim_replacement_spot`, bulk and squad invites, squads, chat, notifications, level calculation, and the updated v2 functions |
-| `seed.sql` | Optional **demo data**: 12 players, 15 games, past results, reviews, one squad |
-| `tests/` | Local tests: 109 v2 checks + 129 v3 checks. Needs no Supabase account. |
+| `migrations/008_v4.sql` | v4: every upcoming game discoverable, 13-sport catalog + `create_sport`, per-sport metrics (`sport_stat_definitions`, `player_game_stat_values`, `player_sport_metric_totals`), win %, game descriptions |
+| `migrations/009_v5.sql` | v5: usernames, private phone numbers + `get_game_contacts`, username search, chat removed, venue address, game end time + automatic expiration from Browse, `my_game_history`, winner-only results + `results_needed` reminders |
+| `seed.sql` | Optional **demo data**: 12 players (usernames + fictional 555 phones), 15 games, past results, reviews, one squad |
+| `tests/` | Local tests: 109 v2 + 117 v3 + 73 v4 + 88 v5 checks. Needs no Supabase account. |
 
 ## Setup (new project)
 
 1. **Create the project:** supabase.com → New project → region **East US**. Save the database password privately.
 2. **Run the SQL:** Dashboard → **SQL Editor** → New query. Paste and **Run** each file in this order:
-   `001` → `002` → `003` → `004` → `005` → `006` → `007` → `seed.sql` (optional, and only **after** all seven).
+   `001` → … → `009` (all nine, in order) → `seed.sql` (optional, and only **after** all nine).
 3. **Auth:** Authentication → Sign In / Providers → Email: enabled, and **Confirm email: off** (per the contract, for the hackathon).
-4. **Realtime:** Database → Publications → `supabase_realtime` should list `notifications` and `game_messages` (`006` adds them). If not, toggle them on there.
+4. **Realtime:** Database → Publications → `supabase_realtime` should list `notifications`. (Chat was removed in v5.)
 5. **Keys for the frontend:** Project Settings → API keys. Share these privately with the frontend (not in Git):
    ```
    VITE_SUPABASE_URL=https://<project>.supabase.co
@@ -29,7 +31,7 @@ Implements [`docs/database-contract-v2.md`](../docs/database-contract-v2.md) plu
    Never share the `service_role` / secret key.
 6. **Check:** Table Editor → `profiles` has 12 rows and `games` has 15 (if you ran the seed).
 
-**Already running v2?** Just run `005` → `006` → `007`. Existing data is kept. Don't re-run the seed.
+**Already running an older version?** Run only the migrations you haven't run yet, in order (from v3: `008` then `009`). Existing data is kept, and old results are copied into the new metrics table. Don't re-run the seed.
 
 ## Demo data
 
@@ -56,4 +58,4 @@ npm install
 npm test
 ```
 
-The tests start a throwaway Postgres, fake Supabase's `auth` schema and roles, run every migration and the seed, then check all contract milestones. `test.mjs` re-runs the v2 checks against the full v3 database, to prove v2 calls still work. `test_v3.mjs` covers every v3 feature, including attempts to break the rules.
+The tests start a throwaway Postgres, fake Supabase's `auth` schema and roles, run every migration and the seed, then check all contract milestones. `test.mjs` re-runs the v2 checks against the full v3 database, to prove v2 calls still work. `test_v3.mjs`, `test_v4.mjs` and `test_v5.mjs` cover every v3, v4 and v5 feature, including attempts to break the rules.

@@ -2,6 +2,6 @@
   "name": "pickup-sports-db-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node test.mjs && node test_v3.mjs" },
+  "scripts": { "test": "node test.mjs && node test_v3.mjs && node test_v4.mjs && node test_v5.mjs" },
   "devDependencies": { "embedded-postgres": "17.5.0-beta.15", "pg": "8.13.1" }
 }

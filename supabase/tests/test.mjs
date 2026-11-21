@@ -83,10 +83,10 @@ try {
   const c = await one(`select (select count(*) from profiles)::int p, (select count(*) from games)::int g,
                               (select count(*) from game_results where status='final')::int r, (select count(*) from sports)::int s,
                               (select count(*) from neighborhoods)::int n`);
-  check('12 profiles, 15 games, 11 final results, 4 sports, 6 neighborhoods', c.p === 12 && c.g === 15 && c.r === 11 && c.s === 4 && c.n === 6, c);
+  check('12 profiles, 15 games, 11 final results, 13 sports (4 + 9 added in v4), 16 neighborhoods (6 + 10 added in v5)', c.p === 12 && c.g === 15 && c.r === 11 && c.s === 13 && c.n === 16, c);
 
   console.log('\n== Access basics');
-  check('anon can read sports', (await as(null, `select * from sports`)).rowCount === 4);
+  check('anon can read sports', (await as(null, `select * from sports`)).rowCount === 13);
   await expectError('anon cannot read profiles', () => as(null, `select * from profiles`), 'permission denied');
   await expectError('anon cannot call functions', () => rpc(null, 'create_game', { p_sport_slug: 'soccer', p_title: 'x', p_venue: 'y',
     p_neighborhood: 'downtown', p_starts_at: new Date(Date.now() + 864e5).toISOString(), p_max_players: 10 }), 'permission denied');
@@ -101,7 +101,8 @@ try {
   await expectError('create_game before onboarding', () => rpc(sam, 'create_game', { p_sport_slug: 'soccer', p_title: 'x', p_venue: 'y',
     p_neighborhood: 'downtown', p_starts_at: new Date(Date.now() + 864e5).toISOString(), p_max_players: 10 }), 'PROFILE_REQUIRED');
   const profileArgs = (over = {}) => ({ p_display_name: '  Sam Lee ', p_neighborhood: 'west-tampa', p_travel_radius_miles: 10, p_bio: 'Forward',
-    p_sports: [{ sport_slug: 'soccer', skill_level: 'intermediate' }], ...over });
+    p_sports: [{ sport_slug: 'soccer', skill_level: 'intermediate' }],
+    p_username: 'samlee', p_phone: '(813) 555-0199', ...over });   // v5: new profiles need username + phone
   await expectError('no sports', () => rpc(sam, 'save_profile', profileArgs({ p_sports: [] })), 'VALIDATION');
   await expectError('duplicate sport', () => rpc(sam, 'save_profile', profileArgs({ p_sports: [{ sport_slug: 'soccer', skill_level: 'beginner' }, { sport_slug: 'soccer', skill_level: 'advanced' }] })), 'VALIDATION');
   await expectError('unknown neighborhood', () => rpc(sam, 'save_profile', profileArgs({ p_neighborhood: 'miami' })), 'VALIDATION');
@@ -126,8 +127,9 @@ try {
     p_neighborhood: 'downtown', p_starts_at: new Date(Date.now() - 6e4).toISOString(), p_max_players: 10 }), 'VALIDATION');
   await expectError('max players 1', () => rpc(marcus, 'create_game', { p_sport_slug: 'soccer', p_title: 'Tiny', p_venue: 'Park',
     p_neighborhood: 'downtown', p_starts_at: soon(), p_max_players: 1 }), 'VALIDATION');
-  check('outsider cannot read the game', (await as(kevin, `select * from games where id=$1`, [game])).rowCount === 0);
-  check('outsider cannot read the roster', (await as(kevin, `select * from game_players where game_id=$1`, [game])).rowCount === 0);
+  // v4: every signed-in user can discover UPCOMING games (past games stay protected; see test_v4.mjs)
+  check('(v4) upcoming game discoverable by outsider', (await as(kevin, `select * from games where id=$1`, [game])).rowCount === 1);
+  check('(v4) upcoming roster discoverable by outsider', (await as(kevin, `select * from game_players where game_id=$1`, [game])).rowCount === 1);
   check('organizer sees own game', (await as(marcus, `select * from games where id=$1`, [game])).rowCount === 1);
 
   console.log('\n== Milestone 1: search');
@@ -141,7 +143,7 @@ try {
   check('radius respected: Kevin (South Tampa, 8 mi) not shown for a USF game', !far.some((r) => r.display_name === "Kevin O'Brien"));
   const adv = await rpc(marcus, 'search_players', { p_sport_slug: 'soccer', p_neighborhood: 'downtown', p_skill_level: 'advanced' });
   check('skill filter', adv.length > 0 && adv.every((r) => r.skill_level === 'advanced'));
-  await expectError('unknown sport', () => rpc(marcus, 'search_players', { p_sport_slug: 'cricket', p_neighborhood: 'downtown' }), 'VALIDATION');
+  await expectError('unknown sport', () => rpc(marcus, 'search_players', { p_sport_slug: 'quidditch', p_neighborhood: 'downtown' }), 'VALIDATION');
 
   console.log('\n== Milestone 1: invite → accept → roster');
   const inv = await rpc(marcus, 'send_invitation', { p_game_id: game, p_recipient_id: sam });

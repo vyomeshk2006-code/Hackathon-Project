@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pickup Sports Tampa — DEMO DATA (optional; run after ALL migrations 001–007)
+-- Pickup Sports Tampa — DEMO DATA (optional; run after ALL migrations 001–009)
 --
 -- Demo accounts all use emails ending in @demo.pickuptampa.test and the
 -- password  demo1234.  Remove everything demo with:
@@ -104,8 +104,8 @@ begin
     from (select player_id, row_number() over (order by random()) rn from public.game_players where game_id = v_game) t
     where gp.game_id = v_game and gp.player_id = t.player_id;
 
-    insert into public.game_results (game_id, team_a_score, team_b_score, status, submitted_by, confirmed_by, confirmed_at)
-    values (v_game, 0, 0, 'final', v_org, v_players[1], now());
+    insert into public.game_results (game_id, team_a_score, team_b_score, winner, status, submitted_by, confirmed_by, confirmed_at)
+    values (v_game, 0, 0, 'draw', 'final', v_org, v_players[1], now());
 
     -- per-player stats; the team score is the sum of its players' goals/points
     insert into public.player_game_stats (game_id, player_id, team, outcome, goals, assists, points)
@@ -120,12 +120,23 @@ begin
       into v_a, v_b
     from public.player_game_stats where game_id = v_game;
 
-    update public.game_results set team_a_score = v_a, team_b_score = v_b where game_id = v_game;
+    update public.game_results set team_a_score = v_a, team_b_score = v_b,
+      winner = case when v_a = v_b then 'draw' when v_a > v_b then 'A' else 'B' end
+    where game_id = v_game;
     update public.player_game_stats set outcome =
       case when v_a = v_b then 'draw' when (team = 'A') = (v_a > v_b) then 'win' else 'loss' end
     where game_id = v_game;
   end loop;
 end $$;
+
+-- v4: one value per defined metric per player (goals/assists/points from above; others 0)
+insert into public.player_game_stat_values (game_id, player_id, sport_slug, stat_key, value)
+select s.game_id, s.player_id, g.sport_slug, d.stat_key,
+       case d.stat_key when 'goals' then s.goals when 'assists' then s.assists when 'points' then s.points else 0 end
+from public.player_game_stats s
+join public.games g                   on g.id = s.game_id
+join public.sport_stat_definitions d on d.sport_slug = g.sport_slug
+on conflict do nothing;
 
 -- A few reviews from the most recent soccer game (rating = sportsmanship, skill_rating = skill)
 insert into public.reviews (game_id, reviewer_id, reviewee_id, rating, skill_rating, comment, sport_slug)
@@ -217,5 +228,18 @@ begin
     perform private.recalc_level(r.user_id, r.sport_slug);
   end loop;
 end $$;
+
+-- v5: usernames = handles, fictional 555-01xx phone numbers, venue addresses
+update public.profiles p set username = d.handle from demo d where d.id = p.id;
+insert into public.private_contacts (user_id, phone_e164)
+select d.id, '+1813555' || lpad((100 + row_number() over (order by d.handle))::text, 4, '0') from demo d
+on conflict (user_id) do nothing;
+update public.games set venue_address = case venue
+    when 'Al Lopez Park'                  then '4810 N Himes Ave, Tampa, FL 33614'
+    when 'Julian B. Lane Riverfront Park' then '1001 N Boulevard, Tampa, FL 33606'
+    when 'Ben T. Davis Beach'             then '7740 W Courtney Campbell Cswy, Tampa, FL 33607'
+    when 'USF Recreation Center'          then '4202 E Fowler Ave, Tampa, FL 33620'
+  end
+where organizer_id in (select id from demo);
 
 drop table demo;
