@@ -177,7 +177,7 @@ export function GameDetail({ session }: { session: Session }) {
             </div>
             <progress value={game.confirmed} max={game.maxPlayers} aria-label="Confirmed players" />
           </div>
-          {!organizer && <ParticipationActions game={game} access={game.participation} />}
+          {!organizer && <ParticipationActions game={game} access={game.participation} allowClaim />}
           {!organizer && game.participation.isMember && isUpcoming(game) && <WithdrawGame game={game} />}
         </section>
         <TeamRoster key={game.id} game={game} organizer={organizer} />

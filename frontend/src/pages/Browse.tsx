@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ActionNotice } from '../components/ActionNotice'
 import { useCatalog } from '../components/SportPicker'
@@ -10,18 +10,22 @@ import { pickup } from '../services'
 import { isUpcoming, neighborhoods } from '../types/domain'
 import type { BrowseFilters, GameSummary, Neighborhood, Participation, Session } from '../types/domain'
 
-export function ParticipationActions({ game, access }: { game: GameSummary; access: Participation }) {
+export function ParticipationActions({ game, access, allowClaim = false }: { game: GameSummary; access: Participation; allowClaim?: boolean }) {
   const action = useAction()
+  const explanationId = useId()
+  const showClaim = allowClaim && access.canClaim
+  const full = game.confirmed >= game.maxPlayers
   if (access.isMember) return <p className="pill">Joined</p>
   if (!isUpcoming(game)) return null
   return <div className="form-stack">
     <div className="flex flex-wrap gap-2 items-center">
-      {access.canClaim && <button className="button primary" disabled={action.pending}
+      {showClaim && <button className="button primary" disabled={action.pending}
         onClick={() => void action.run(() => pickup.claimReplacement(game.id), 'Replacement spot claimed.')}>Claim spot</button>}
-      {access.canJoin && !access.canClaim && <button className="button primary" disabled={action.pending}
+      {access.canJoin && !showClaim && <button className="button primary" disabled={action.pending}
         onClick={() => void action.run(() => pickup.joinGame(game.id), 'You joined the game.')}>Join game</button>}
-      {access.canRequest && !access.canClaim && <button className="button primary" disabled={action.pending}
+      {access.canRequest && !showClaim && <button className="button primary" disabled={action.pending}
         onClick={() => void action.run(() => pickup.requestToJoin(game.id), 'Request sent.')}>Request to join</button>}
+      {access.canClaim && !allowClaim && <Link className="button secondary" to={'/games/' + game.id}>View replacement spot</Link>}
       {access.invitationId && <Link className="button secondary" to={'/invitations?invitation=' + access.invitationId}>Respond to invitation</Link>}
       {access.requestId && <>
         <span className="pill">Request pending</span>
@@ -30,9 +34,13 @@ export function ParticipationActions({ game, access }: { game: GameSummary; acce
           if (id) void action.run(() => pickup.cancelJoinRequest(id), 'Request cancelled.')
         }}>Cancel request</button>
       </>}
-      {game.confirmed >= game.maxPlayers && <span className="pill">Game full</span>}
-      {game.confirmed < game.maxPlayers && !access.canJoin && !access.canRequest && !access.canClaim && !access.requestId && !access.invitationId &&
-        <span className="muted">{game.joinMode === 'invite_only' ? 'Invitation required' : 'Not eligible to join'}</span>}
+      {access.requestId && full && <span className="pill">Game full</span>}
+      {!access.canJoin && !access.canRequest && !showClaim && !access.requestId && <>
+        <button className="button secondary" disabled aria-describedby={explanationId}>
+          {game.joinMode === 'invite_only' ? 'Request to join' : 'Join game'}
+        </button>
+        <p id={explanationId} className="muted">{full ? 'Game full.' : access.ineligibleReason ?? 'This action is unavailable.'}</p>
+      </>}
     </div>
     <ActionNotice {...action} />
   </div>
@@ -40,7 +48,7 @@ export function ParticipationActions({ game, access }: { game: GameSummary; acce
 
 export function BrowseGames({ session }: { session: Session }) {
   const catalog = useCatalog()
-  const [filters, setFilters] = useState<BrowseFilters>({ openSpots: true })
+  const [filters, setFilters] = useState<BrowseFilters>({ openSpots: false })
   const badDates = Boolean(filters.from && filters.to && filters.from > filters.to)
   const { state, retry } = useResource('browse:' + session.userId + JSON.stringify(filters),
     () => badDates ? Promise.resolve([]) : pickup.browseGames(filters))

@@ -86,7 +86,7 @@ test('a full game keeps the competing invitation pending and allows decline', as
   await assert.rejects(service.respond(secondInvite, 'accepted'), /full/)
   assert.equal((await service.inbox())[0].id, secondInvite)
   assert.equal(await service.respond(secondInvite, 'declined'), 'declined')
-  assert.equal(await service.getGame(gameId), null)
+  assert.equal((await service.getGame(gameId)).participation.isMember, false)
   assert.deepEqual(await service.myGames(), [])
   signInAsDemoAccount(jordan.id)
   await assert.rejects(service.invite(gameId, playerId), { code: 'INVITATION_CLOSED' })

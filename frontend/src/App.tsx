@@ -1,6 +1,6 @@
 import { Goal } from 'lucide-react'
 import { useState } from 'react'
-import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { LoadError, Notice, PageTitle } from './components/ui'
 import { CatalogProvider } from './components/SportPicker'
 import { BrowseGames } from './pages/Browse'
@@ -53,7 +53,6 @@ function Header({ session }: { session: Session | null }) {
 }
 
 function AppPages({ session }: { session: Session | null }) {
-  const location = useLocation()
   const { state, retry } = useResource(session?.userId ?? 'signed-out', () =>
     session ? pickup.getProfile(session.userId) : Promise.resolve(null))
 
@@ -61,22 +60,32 @@ function AppPages({ session }: { session: Session | null }) {
   if (state.status === 'loading') return <Notice>Loading your profile…</Notice>
   if (state.status === 'error') return <LoadError error={state.error} retry={retry} />
   const profile = state.data
-  if (!profile) return location.pathname === '/onboarding' ? <ProfileEditor profile={null} /> : <Navigate to="/onboarding" replace />
+  const discoveryRoutes = <>
+    <Route path="/browse" element={<BrowseGames session={session} />} />
+    <Route path="/games/:id" element={<GameDetail session={session} />} />
+  </>
+  if (!profile) return (
+    <Routes>
+      {discoveryRoutes}
+      <Route path="/games/new" element={<Navigate to="/onboarding" replace />} />
+      <Route path="/onboarding" element={<ProfileEditor profile={null} />} />
+      <Route path="*" element={<Navigate to="/onboarding" replace />} />
+    </Routes>
+  )
 
   return (
     <Routes>
+      {discoveryRoutes}
       <Route path="/home" element={<Dashboard profile={profile} session={session} />} />
       <Route path="/onboarding" element={<Navigate to="/home" replace />} />
       <Route path="/profile/edit" element={<ProfileEditor key={profile.id} profile={profile} />} />
       <Route path="/players" element={<Discovery session={session} />} />
       <Route path="/players/:id" element={<PlayerProfile session={session} />} />
       <Route path="/games" element={<MyGames session={session} />} />
-      <Route path="/browse" element={<BrowseGames session={session} />} />
       <Route path="/squads" element={<Squads session={session} profile={profile} />} />
       <Route path="/notifications" element={<Notifications session={session} />} />
       <Route path="/settings" element={<Settings session={session} />} />
       <Route path="/games/new" element={<CreateGame />} />
-      <Route path="/games/:id" element={<GameDetail session={session} />} />
       <Route path="/invitations" element={<Invitations session={session} />} />
       <Route path="*" element={<><PageTitle title="Page unavailable" /><Link className="button secondary" to="/home">Back to dashboard</Link></>} />
     </Routes>
